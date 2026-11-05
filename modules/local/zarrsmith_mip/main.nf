@@ -1,7 +1,7 @@
 process ZARRSMITH_MIP {
     tag "${meta.id}"
     label 'process_medium'
-    container 'ghcr.io/embl-mif/zarrsmith:0.6.1'
+    container 'ghcr.io/embl-mif/zarrsmith:0.6.4'
 
     input:
     tuple val(meta), path(input_zarr)
