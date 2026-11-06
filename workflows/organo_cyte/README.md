@@ -1,4 +1,4 @@
-# org_facs
+# organo_cyte
 
 Converts microscopy datasets to OME-Zarr, tiles each converted image, segments
 every tile with Cellpose-SAM, matches and merges labels across tile borders
@@ -166,7 +166,7 @@ with `nextflow clean` or by deleting the work directory.
 ```bash
 module load Nextflow/25.10.1
 
-nextflow run /path/to/nf-modules/workflows/org_facs/main.nf \
+nextflow run /path/to/nf-modules/workflows/organo_cyte/main.nf \
     -lib /path/to/nf-modules/lib \
     --input_csv /path/to/input.csv \
     --cellpose_model_path /g/mif-hd/shared/cellpose_models/cpsam \
