@@ -66,7 +66,8 @@ override any parameter on the command line (`--<parameter> <value>`).
 | Convert, make a 2D maximum-intensity projection (MIP) and segment the MIP | [conv_mip_cellpose](workflows/conv_mip_cellpose/README.md) |
 | Segment a MIP in two passes: seed segmentation, filter objects by size/shape, then a final segmentation guided by the filtered seeds | [conv_mip_cpsam_filt_mask_cpsam](workflows/conv_mip_cpsam_filt_mask_cpsam/README.md) |
 | Do the above and also measure endothelial cell morphology, edge-band intensities and cell-free area | [endo_morph](workflows/endo_morph/README.md) |
-| Convert, segment tile by tile, and extract per-object features (organoid FACS-style analysis) | [org_facs](workflows/org_facs/README.md) |
+| Convert, segment tile by tile, and extract per-object features (organoid FACS-style analysis) | [organo_cyte](workflows/organo_cyte/README.md) |
+| Do the above on images resampled to a new pixel size | [resample_organo_cyte](workflows/resample_organo_cyte/README.md) |
 | Measure features of existing labels against an existing image | [feature_extraction](workflows/feature_extraction/README.md) |
 | Run an ilastik pixel classifier on one OME-Zarr | `ilastik_simple` (see [below](#workflows-without-a-readme)) |
 | Run an ilastik pixel classifier tile by tile on several OME-Zarrs | `ilastik_tile` (see [below](#workflows-without-a-readme)) |
@@ -81,7 +82,8 @@ override any parameter on the command line (`--<parameter> <value>`).
 | `conv_mip_cellpose` | convert → MIP → Cellpose-SAM | OME-Zarr, MIP, labels | yes |
 | `conv_mip_cpsam_filt_mask_cpsam` | convert → MIP → seed Cellpose-SAM → measure → filter → clean channel → final Cellpose-SAM | OME-Zarr, MIP, seed and final labels, measurement CSVs | yes (2 runs) |
 | `endo_morph` | as above → edge bands and empty area → morphology and band intensities → merge | as above, plus per-cell and per-image CSVs | yes (2 runs) |
-| `org_facs` | convert → tiled Cellpose-SAM → label OME-Zarr → features | OME-Zarr, labels, features CSV | yes |
+| `organo_cyte` | convert → tiled Cellpose-SAM → label OME-Zarr → features | OME-Zarr, labels, features CSV | yes |
+| `resample_organo_cyte` | convert → resample → tiled Cellpose-SAM → label OME-Zarr → features | OME-Zarr, resampled OME-Zarr, labels, features CSV | yes |
 | `feature_extraction` | measure labels against image | features CSV | no |
 | `ilastik_simple` | ilastik pixel classification | probability OME-Zarr | no |
 | `ilastik_tile` | tile → ilastik pixel classification | probability OME-Zarr | no |
@@ -184,7 +186,7 @@ the templates), or the path to your own fine-tuned model.
 
 ### Tiled workflows
 
-`org_facs` keeps per-tile segmentations in nextflow `workdir` so tiles that already finished are skipped on a re-run.
+`organo_cyte` and `resample_organo_cyte` keep per-tile segmentations in nextflow `workdir` so tiles that already finished are skipped on a re-run.
 
 ## Workflows without a README
 

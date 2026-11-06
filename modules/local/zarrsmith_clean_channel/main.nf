@@ -1,7 +1,7 @@
 process ZARRSMITH_CLEAN_CHANNEL {
     tag "${meta.id}"
     label 'process_high'
-    container 'ghcr.io/embl-mif/zarrsmith:0.6.4'
+    container 'ghcr.io/embl-mif/zarrsmith:0.6.5'
 
     input:
     tuple val(meta), path(intensity_zarr), path(labels_zarr)
