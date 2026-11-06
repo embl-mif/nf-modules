@@ -81,7 +81,7 @@ override any parameter on the command line (`--<parameter> <value>`).
 | `conv_cellpose` | convert → Cellpose-SAM | OME-Zarr, labels | yes |
 | `conv_mip_cellpose` | convert → MIP → Cellpose-SAM | OME-Zarr, MIP, labels | yes |
 | `conv_mip_cpsam_filt_mask_cpsam` | convert → MIP → seed Cellpose-SAM → measure → filter → clean channel → final Cellpose-SAM | OME-Zarr, MIP, seed and final labels, measurement CSVs | yes (2 runs) |
-| `endo_morph` | as above → edge bands and empty area → morphology and band intensities → merge | as above, plus per-cell and per-image CSVs | yes (2 runs) |
+| `endo_morph` | as above → edge bands and empty area → morphology and band intensities → merge | as above, plus per-cell, per-gap and per-image CSVs | yes (2 runs) |
 | `organo_cyte` | convert → tiled Cellpose-SAM → label OME-Zarr → features | OME-Zarr, labels, features CSV | yes |
 | `resample_organo_cyte` | convert → resample → tiled Cellpose-SAM → label OME-Zarr → features | OME-Zarr, resampled OME-Zarr, labels, features CSV | yes |
 | `feature_extraction` | measure labels against image | features CSV | no |

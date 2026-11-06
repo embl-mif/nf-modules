@@ -41,6 +41,7 @@ process ZARRSMITH_ENDOMORPH_REGIONS {
     def emptyCoreThresholdArg = meta.endomorph_empty_core_threshold != null ? "--empty-core-threshold ${meta.endomorph_empty_core_threshold}" : ""
     def emptyEdgeThresholdArg = meta.endomorph_empty_edge_threshold != null ? "--empty-edge-threshold ${meta.endomorph_empty_edge_threshold}" : ""
     def emptyMaxFloorRatioArg = meta.endomorph_empty_max_floor_ratio != null ? "--empty-max-floor-ratio ${meta.endomorph_empty_max_floor_ratio}" : ""
+    def emptyBorderMarginArg = meta.endomorph_empty_border_margin != null ? "--empty-border-margin ${meta.endomorph_empty_border_margin}" : ""
 
     """
     mkdir -p \$(dirname ${shellQuote(output_zarr)})
@@ -67,7 +68,8 @@ process ZARRSMITH_ENDOMORPH_REGIONS {
         ${emptyCellPercentileArg} \
         ${emptyCoreThresholdArg} \
         ${emptyEdgeThresholdArg} \
-        ${emptyMaxFloorRatioArg}
+        ${emptyMaxFloorRatioArg} \
+        ${emptyBorderMarginArg}
 
     if [ ! -e ${shellQuote(output_zarr)}/zarr.json ] && [ ! -e ${shellQuote(output_zarr)}/.zgroup ]; then
         echo "ERROR: expected zarr store not found: ${output_zarr}" >&2

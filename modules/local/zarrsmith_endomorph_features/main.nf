@@ -7,16 +7,18 @@ process ZARRSMITH_ENDOMORPH_FEATURES {
     tuple val(meta), path(intensity_zarr), path(labels_zarr), path(regions_zarr)
 
     output:
-    tuple val(meta), path(output_csv_link), path(output_summary_csv_link), emit: csv
-    path "versions.yml"                                                  , emit: versions
+    tuple val(meta), path(output_csv_link), path(output_summary_csv_link), path(output_gaps_csv_link), emit: csv
+    path "versions.yml"                                                                             , emit: versions
 
     script:
     output_csv = meta.csv_output ?: "${meta.id}_endomorph_cells.csv"
     output_summary_csv = meta.summary_csv_output ?: "${meta.id}_endomorph_summary.csv"
+    output_gaps_csv = meta.gaps_csv_output ?: "${meta.id}_endomorph_gaps.csv"
     // A `path` output must live in the work dir: an absolute output is exposed there as a
     // symlink named after it (see Utils.shellLinkOutput), a relative one is the output itself.
     output_csv_link = new File(output_csv.toString()).name
     output_summary_csv_link = new File(output_summary_csv.toString()).name
+    output_gaps_csv_link = new File(output_gaps_csv.toString()).name
 
     def shellQuote = { value ->
         "'${value.toString().replace("'", "'\"'\"'")}'"
@@ -29,11 +31,12 @@ process ZARRSMITH_ENDOMORPH_FEATURES {
     def measureChannelsArg = meta.endomorph_measure_channels ? "--measure-channels ${shellQuote(meta.endomorph_measure_channels)}" : ""
 
     """
-    if [ -e ${shellQuote(output_csv)} ] && [ -e ${shellQuote(output_summary_csv)} ]; then
+    if [ -e ${shellQuote(output_csv)} ] && [ -e ${shellQuote(output_summary_csv)} ] && [ -e ${shellQuote(output_gaps_csv)} ]; then
         echo "Output already exists, skipping endo_morph feature extraction: ${output_csv}"
     else
         mkdir -p \$(dirname ${shellQuote(output_csv)})
         mkdir -p \$(dirname ${shellQuote(output_summary_csv)})
+        mkdir -p \$(dirname ${shellQuote(output_gaps_csv)})
 
         extract_endomorph_features.py \
             --intensity "${intensity_zarr}" \
@@ -41,6 +44,7 @@ process ZARRSMITH_ENDOMORPH_FEATURES {
             --regions "${regions_zarr}" \
             --output "${output_csv}" \
             --output-summary "${output_summary_csv}" \
+            --output-gaps "${output_gaps_csv}" \
             --dataset-id ${shellQuote(meta.id)} \
             ${intensityLevelArg} \
             ${labelsLevelArg} \
@@ -59,8 +63,14 @@ process ZARRSMITH_ENDOMORPH_FEATURES {
         exit 1
     fi
 
+    if [ ! -e ${shellQuote(output_gaps_csv)} ]; then
+        echo "ERROR: expected gaps CSV not found: ${output_gaps_csv}" >&2
+        exit 1
+    fi
+
     ${Utils.shellLinkOutput(output_csv)}
     ${Utils.shellLinkOutput(output_summary_csv)}
+    ${Utils.shellLinkOutput(output_gaps_csv)}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

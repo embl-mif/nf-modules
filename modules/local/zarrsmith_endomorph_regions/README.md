@@ -1,11 +1,11 @@
 # ZARRSMITH_ENDOMORPH_REGIONS
 
-Builds one label OME-Zarr with, for every cell not touching the image border, N nested edge-distance bands (`1`..`N` = R1..RN, any number N >= 1 of ring depths), plus the empty area (`N+1`) and not-imaged area (`N+2`) estimated from the fluorescence of the given channels. Empty and not-imaged pixels overwrite the bands. Makes no assumption about what the channels stain.
+Builds one label OME-Zarr with, for every cell not touching the image border, N nested edge-distance bands (`1`..`N` = R1..RN, any number N >= 1 of ring depths), plus the empty area (`N+1`) and not-imaged area (`N+2`) estimated from the fluorescence of the given channels. Gaps (connected empty regions) touching the image border or the not-imaged area (within `endomorph_empty_border_margin` px, default 0) are cut by the field of view and written as `N+3`, so they are excluded from the gap measurements downstream. Empty and not-imaged pixels overwrite the bands. Makes no assumption about what the channels stain.
 
 ## Input
 | Name | Type | Description |
 | --- | --- | --- |
-| `meta` | val | Sample map (`id`, `endomorph_ring_depths`, `endomorph_border_margin`, `endomorph_empty_channels` (default: all channels), `endomorph_empty_*`, resolution levels, output name) |
+| `meta` | val | Sample map (`id`, `endomorph_ring_depths`, `endomorph_border_margin`, `endomorph_empty_channels` (default: all channels), `endomorph_empty_*` (incl. `endomorph_empty_border_margin`), resolution levels, output name) |
 | `labels_zarr` | path | Final cell labels |
 | `intensity_zarr` | path | Intensity OME-Zarr (the MIP, not the cleaned image) |
 | `nucleus_zarr` | path | Clean-channel OME-Zarr: its nuclear channel (`meta.endomorph_empty_nucleus_channel`, default the `..._clean` Hoechst/DAPI channel) marks host nuclei, which are never empty |

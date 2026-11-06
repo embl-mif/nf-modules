@@ -17,13 +17,16 @@ the standalone `endo_morph` scripts
    from the fluorescence of `endomorph_empty_channels` with the host nuclei of
    the clean-channel zarr excluded -- never from the labels, since Cellpose can
    both miss cells and over-reach into cell-free pixels -- and the not-imaged
-   area.
+   area. Like the cells, gaps touching the image border are cut by the field
+   of view and are excluded from the gap measurements.
 9. Against that regions zarr, measure per-cell shape morphology (area,
    perimeter, aspect ratio, orientation) and the mean intensity of every
-   measured channel in each band (and over the whole cell), and write the
-   per-image summary (cell counts and empty-area statistics).
-10. Merge the per-dataset cells and summary CSVs of all rows into one cells
-   CSV and one summary CSV, saved next to the launch `.sh` script.
+   measured channel in each band (and over the whole cell), the centroid and
+   area of every gap, and write the per-image summary (cell and gap counts and
+   empty-area statistics).
+10. Merge the per-dataset cells, gaps and summary CSVs of all rows into one
+   cells CSV, one gaps CSV and one summary CSV, saved next to the launch `.sh`
+   script.
 
 Both new stages always run at the same pyramid level as the final Cellpose
 segmentation (`resolution_level`/`meta.resolution_level`), for the same
@@ -70,7 +73,8 @@ size. To keep the same physical bands at the next level, halve the depths (e.g.
 The bands are written as one label image: each pixel holds the *narrowest* band
 that contains it (`1` = R1, `2` = R2 outside R1, ... `N` = RN outside R(N-1)).
 Anything deeper than RN, background pixels, and cells excluded for touching the
-image border are `0`; the empty area is `N+1` and the not-imaged area `N+2`.
+image border are `0`; the empty area is `N+1`, the not-imaged area `N+2` and the
+empty area touching the image border (excluded, see below) `N+3`.
 
 ### Cells at the image border -- stage 8
 
@@ -163,6 +167,25 @@ parasite DNA removed, so only host nuclei are excluded, not parasite DNA).
    3 um^2) are ignored. Labels are not consulted, so a cell-free hole inside a cell mask counts as
    empty. The outline of a gap hardly depends on the edge threshold (it moves less than 1 px
    between 0.5 and 0.8).
+6. **Gaps at the image border.** Each connected empty region is one gap. A gap with any pixel
+   within `endomorph_empty_border_margin` pixels (default **0**, i.e. touching) of the image
+   edge or of the not-imaged area is cut by the field of view, like a border cell: its size and
+   centroid are not real. It is written as `N+3` instead of `N+1` and is **excluded** from the
+   gap measurements: it is absent from `_endomorph_gaps.csv`, from `empty_area` /
+   `empty_area_pct` and from `n_gaps_analysed`. It is reported separately
+   (`empty_border_area_pct`, and counted in `n_gaps`), and it still counts as cell-free: it is
+   kept out of the cell bands and never counts as `undetected_cell_area_pct`.
+
+### Gaps -- stage 9
+
+Every gap not touching the image border (label `N+1` of the regions zarr, one connected region
+per gap) is one row of `_endomorph_gaps.csv`:
+
+| Column | Definition |
+| --- | --- |
+| `gap_id` | Gap number within the image (1..`n_gaps_analysed`) |
+| `centroid_y_px`, `centroid_x_px` | Centroid of the gap, in pixels of the analysed level (same convention as the cells' centroid) |
+| `area_px`, `area` | Gap area in pixels and in physical units² |
 
 > **Size limit: small regions are not included in the gap percentage.** A gap is counted only if it contains a
 > core at background of at least `endomorph_empty_core_min_area` (default 1.5 um^2, about 43 px at 0.186 um/px) and
@@ -177,10 +200,11 @@ The summary reports these complementary percentages of the imaged area:
 
 | Column | Meaning |
 | --- | --- |
-| `empty_area_pct` | No cells, from the signal. **This is the empty area** |
+| `empty_area_pct` | No cells, from the signal, in the gaps not touching the image border. **This is the empty area** |
+| `empty_border_area_pct` | No cells, in the gaps touching the image border (excluded from `empty_area_pct`) |
 | `unlabelled_area_pct` | No Cellpose label (the naive definition of empty; border cells count as labelled) |
-| `undetected_cell_area_pct` | Cell signal but no label: cells missed by Cellpose |
-| `empty_in_cells_area_pct` | Empty but covered by a cell mask: segmentation over-reaching |
+| `undetected_cell_area_pct` | Cell signal but no label: cells missed by Cellpose (all gaps, including those at the border, count as no cell signal) |
+| `empty_in_cells_area_pct` | Empty (gaps not touching the border) but covered by a cell mask: segmentation over-reaching |
 
 The last two say how well the segmentation matches the signal in each
 direction. Both are usually small; a large value means the masks and the
@@ -211,8 +235,9 @@ applies unchanged. These columns are added:
 | `endomorph_regions_output` | Absolute path of the region-bands OME-Zarr (stage 8), or blank. Blank defaults to `<dataset_id>_endomorph_regions.ome.zarr` in the task work directory. |
 | `endomorph_cells_output` | Absolute path of the per-cell CSV (stage 9: morphology + band intensities), or blank. Blank defaults to `<dataset_id>_endomorph_cells.csv` in the task work directory. |
 | `endomorph_summary_output` | Absolute path of the per-image summary CSV (stage 9), or blank. Blank defaults to `<dataset_id>_endomorph_summary.csv` in the task work directory. |
+| `endomorph_gaps_output` | Absolute path of the per-gap CSV (stage 9: centroid + area of every gap not touching the border), or blank. Blank defaults to `<dataset_id>_endomorph_gaps.csv` in the task work directory. |
 
-This workflow has no `default_outdir`: every `*_output` column (these three and
+This workflow has no `default_outdir`: every `*_output` column (these four and
 all the inherited ones) is either an absolute path, which is written directly
 to that location, or blank, which leaves the file in the work directory of the
 process that made it (a relative path is rejected). Set absolute paths for the
@@ -229,9 +254,11 @@ outputs you want to keep.
 With `N` bands, bands and empty area are written to `endomorph_regions_output` as a
 single-level OME-Zarr label image, at the resolution of the MIP: `1`..`N` =
 R1..RN (each pixel holds the narrowest band containing it), `N+1` = empty
-area, `N+2` = not imaged, `0` = none of these (including cells excluded for
-touching the border). Empty and not-imaged pixels overwrite the bands, so a
-cell pixel that is empty is not counted in that cell's bands.
+area, `N+2` = not imaged, `N+3` = empty area touching the image border
+(excluded from the gap measurements), `0` = none of these (including cells
+excluded for touching the border). Empty (`N+1` and `N+3`) and not-imaged
+pixels overwrite the bands, so a cell pixel that is empty is not counted in
+that cell's bands.
 `ZARRSMITH_ENDOMORPH_FEATURES` reads everything it needs, including the empty
 area, from this zarr, and treats a cell as measured if it has any band pixel;
 a cell with none was excluded here for touching the border.
@@ -255,6 +282,7 @@ Channels are given as the exact `channel_names` entry of the MIP (e.g. `Alexa_48
 | `endomorph_empty_edge_threshold` | A gap extends to where the normalized cell signal reaches this. Defaults to `0.65`. |
 | `endomorph_empty_max_floor_ratio` | No gap unless its background is below this fraction of the darkest cell pixels. Defaults to `0.55`. |
 | `endomorph_empty_nucleus_factor` | A pixel is nucleus when its nuclear signal exceeds this multiple of the image median. Defaults to `8`. |
+| `endomorph_empty_border_margin` | Gaps with any pixel within this many pixels of the image border (or of the not-imaged area) are cut by the field of view and excluded from the gap measurements (written as `N+3`). Defaults to `0` (touching only). |
 
 See [Algorithm](#algorithm) for what each of these settings does. The bands
 are ported unchanged from the standalone `endo_morph` scripts
@@ -288,18 +316,20 @@ For each dataset (`<id>` = `dataset_id`), at the path given in the matching
 
 | File | Content |
 | --- | --- |
-| `<id>_endomorph_regions.ome.zarr` | Region-bands + empty-area label image (stage 8; `1`..`N` = bands, `N+1` = empty, `N+2` = not imaged, `0` = the rest) |
+| `<id>_endomorph_regions.ome.zarr` | Region-bands + empty-area label image (stage 8; `1`..`N` = bands, `N+1` = empty, `N+2` = not imaged, `N+3` = empty touching the image border, `0` = the rest) |
+| `<id>_endomorph_gaps.csv` | One row per gap not touching the image border: `dataset_id`, `gap_id`, `centroid_y_px`, `centroid_x_px`, `area_px`, `area` |
 | `<id>_endomorph_cells.csv` | One row per measured cell: `dataset_id`, `label`, centroid, area, perimeter, axis lengths, `aspect_ratio`, `orientation_deg`, `R<k>_area_px` for every band, and the mean of every measured channel in every band and in the whole cell: `R<k>_<channel>_mean` and `cell_<channel>_mean` (`<channel>` = the channel name, spaces replaced by `_`) |
-| `<id>_endomorph_summary.csv` | One row for the image: `dataset_id`, `n_cells` (all labelled cells, including those touching the border), `n_cells_analysed` (rows of the cells CSV), `image_area`, `imaged_area`, the area statistics computed from the regions zarr (`empty_area`, `empty_area_pct`, `unlabelled_area_pct`, `undetected_cell_area_pct`, `empty_in_cells_area_pct`), `mean_area`/`mean_aspect_ratio`/`mean_perimeter` over the measured cells, pixel size and unit, `n_regions` and `measured_channels` (channel name -> index) |
+| `<id>_endomorph_summary.csv` | One row for the image: `dataset_id`, `n_cells` (all labelled cells, including those touching the border), `n_cells_analysed` (rows of the cells CSV), `n_gaps` (all gaps, including those touching the border), `n_gaps_analysed` (rows of the gaps CSV), `image_area`, `imaged_area`, the area statistics computed from the regions zarr (`empty_area`, `empty_area_pct`, `empty_border_area`, `empty_border_area_pct`, `unlabelled_area_pct`, `undetected_cell_area_pct`, `empty_in_cells_area_pct`), `mean_area`/`mean_aspect_ratio`/`mean_perimeter` over the measured cells, pixel size and unit, `n_regions` and `measured_channels` (channel name -> index) |
 
-`ZARRSMITH_ENDOMORPH_REGIONS` also writes `<id>_endomorph_empty_qc.json` to its work directory: the QC diagnostics of the empty-area (gap) estimation (`empty_channel_levels` = background, cell level and `floor_ratio` of every channel and whether it was used, `empty_gap_found`, `empty_n_gaps`, `empty_nucleus_channel`, `empty_nucleus_veto_area_pct`, `empty_threshold`, `empty_background_ratio`, `empty_seed_area_pct`, `empty_channels_used`, and the settings used). Check it before trusting the empty area of a new dataset: `empty_nucleus_channel` should be the `_clean` nuclear channel (e.g. `HOECHST_33342_clean`), and where gaps exist the `floor_ratio` of the used channels should be below about 0.55.
+`ZARRSMITH_ENDOMORPH_REGIONS` also writes `<id>_endomorph_empty_qc.json` to its work directory: the QC diagnostics of the empty-area (gap) estimation (`empty_channel_levels` = background, cell level and `floor_ratio` of every channel and whether it was used, `empty_gap_found`, `empty_n_gaps` (gaps not touching the border), `empty_n_gaps_border_excluded`, `empty_nucleus_channel`, `empty_nucleus_veto_area_pct`, `empty_threshold`, `empty_background_ratio`, `empty_seed_area_pct`, `empty_channels_used`, and the settings used). Check it before trusting the empty area of a new dataset: `empty_nucleus_channel` should be the `_clean` nuclear channel (e.g. `HOECHST_33342_clean`), and where gaps exist the `floor_ratio` of the used channels should be below about 0.55.
 
-Once all datasets are done, two merged files are written to
+Once all datasets are done, three merged files are written to
 `--merged_output_dir` (next to the launch `.sh` script):
 
 | File | Content |
 | --- | --- |
 | `endomorph_cells_merged.csv` | All `<id>_endomorph_cells.csv` rows, told apart by `dataset_id` |
+| `endomorph_gaps_merged.csv` | All `<id>_endomorph_gaps.csv` rows, told apart by `dataset_id` |
 | `endomorph_summary_merged.csv` | All `<id>_endomorph_summary.csv` rows, one per dataset |
 
 They are overwritten on every run (a `-resume` that reuses cached results
