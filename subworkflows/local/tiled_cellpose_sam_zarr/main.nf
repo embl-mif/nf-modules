@@ -6,6 +6,7 @@ include { FIND_TILE_NEIGHBORS   } from '../../../modules/local/find_tile_neighbo
 include { LOCAL_LABEL_MATCHER   } from '../../../modules/local/local_label_matcher/main'
 include { LABEL_SOLVER          } from '../../../modules/local/label_solver/main'
 include { WRITE_RELABELED_TILE  } from '../../../modules/local/write_relabeled_tile/main'
+include { ZARRSMITH_CONVERSION as ZARRSMITH_CONVERT_LABELS } from '../../../modules/local/zarrsmith_conversion/main'
 
 workflow TILED_CELLPOSE_SAM_ZARR {
 
@@ -38,7 +39,12 @@ workflow TILED_CELLPOSE_SAM_ZARR {
         .join( ch_split_images.map { id, meta, image, localImage, imageUri -> tuple(id, meta, localImage, imageUri) } )
         .map { srcId, tileCsv, parentMeta, localImage, imageUri ->
             def mergedOutputZarr = Utils.resolveOutput(parentMeta, 'labels_output', "${srcId}_merged_labels.ome.zarr", srcId)
-            def mergedMeta = [id: srcId, dtype: 'uint32', data_type: 'label', zarr_output: mergedOutputZarr]
+            // The preallocated store is only an intermediate in the work dir: its
+            // metadata is not spec-compliant OME-Zarr (napari-ome-zarr can't open it),
+            // so ZARRSMITH_CONVERT_LABELS rewrites it to the final labels_output.
+            def mergedMeta = [id: srcId, dtype: 'uint32', data_type: 'label',
+                              zarr_output: "${srcId}_merged_labels_prealloc.ome.zarr",
+                              labels_output: mergedOutputZarr]
             tuple(mergedMeta, localImage, imageUri, tileCsv)
         }
 
@@ -182,7 +188,14 @@ workflow TILED_CELLPOSE_SAM_ZARR {
     )
     ch_versions = ch_versions.mix(POPULATE_PYRAMID.out.versions)
 
+    ZARRSMITH_CONVERT_LABELS(
+        POPULATE_PYRAMID.out.zarr.map { meta, store ->
+            tuple(meta.subMap(['id', 'dtype', 'data_type']) + [zarr_output: meta.labels_output], store)
+        }
+    )
+    ch_versions = ch_versions.mix(ZARRSMITH_CONVERT_LABELS.out.versions)
+
     emit:
-    labels   = POPULATE_PYRAMID.out.zarr
+    labels   = ZARRSMITH_CONVERT_LABELS.out.zarr
     versions = ch_versions
 }
