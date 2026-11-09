@@ -42,9 +42,12 @@ workflow TILED_CELLPOSE_SAM_ZARR {
             // The preallocated store is only an intermediate in the work dir: its
             // metadata is not spec-compliant OME-Zarr (napari-ome-zarr can't open it),
             // so ZARRSMITH_CONVERT_LABELS rewrites it to the final labels_output.
+            // zarrsmith rebuilds the pyramid, so it gets the image's own conversion
+            // settings to keep labels and image on the same levels.
             def mergedMeta = [id: srcId, dtype: 'uint32', data_type: 'label',
                               zarr_output: "${srcId}_merged_labels_prealloc.ome.zarr",
-                              labels_output: mergedOutputZarr]
+                              labels_output: mergedOutputZarr,
+                              convert_opts: parentMeta.subMap(['zarr_format', 'num_levels', 'downscale_factor'])]
             tuple(mergedMeta, localImage, imageUri, tileCsv)
         }
 
@@ -190,7 +193,7 @@ workflow TILED_CELLPOSE_SAM_ZARR {
 
     ZARRSMITH_CONVERT_LABELS(
         POPULATE_PYRAMID.out.zarr.map { meta, store ->
-            tuple(meta.subMap(['id', 'dtype', 'data_type']) + [zarr_output: meta.labels_output], store)
+            tuple(meta.subMap(['id', 'dtype', 'data_type']) + meta.convert_opts + [zarr_output: meta.labels_output], store)
         }
     )
     ch_versions = ch_versions.mix(ZARRSMITH_CONVERT_LABELS.out.versions)
