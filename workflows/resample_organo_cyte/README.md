@@ -19,7 +19,7 @@ segmented and measured on the converted image, exactly as in `organo_cyte`.
    size (`zarrsmith resample`). Only for rows with a `pixel_size` (or with
    `--pixel_size` set). Skipped if the store already exists.
 3. `TILED_CELLPOSE_SAM_ZARR` (subworkflow) – segment the image tile by tile and merge
-   the result into the final label OME-Zarr (`labels_output_final`):
+   the result into the final label OME-Zarr (`labels_output`):
    1. `TILE_CONSTRUCTOR` – compute the tile grid (and optional ROI).
    2. `PREALLOCATE_ZARR` – pre-allocate the merged `uint32` label store.
    3. `CELLPOSE_SAM_ZARR_MIF` – segment every tile on a GPU. With `-resume`,
@@ -37,7 +37,7 @@ segmented and measured on the converted image, exactly as in `organo_cyte`.
 
 One dataset per row. Blank cells fall back to the default listed below. Only
 `input` is mandatory. Paths containing commas must be CSV-quoted. Every output
-column (`output`, `resampled_output`, `labels_output_final`, `features_output`)
+column (`output`, `resampled_output`, `labels_output`, `features_output`)
 must be an **absolute** path, or blank to use the default.
 
 ### General
@@ -77,9 +77,8 @@ Same columns as [organo_cyte](../organo_cyte/README.md#2-tiled-cellpose-sam-segm
 `tile_size_x`, `tile_size_y`, `tile_size_z`, `tile_overlap`, `resolution_level`,
 `use_physical_units`, `x_min` ... `z_max`, `cellpose_channels`, `cellpose_diameter`,
 `cellpose_niter`, `cellpose_flow_threshold`, `cellpose_cellprob_threshold`,
-`cellpose_halo`, `do_3D`, and `labels_output_final` (default
-`<outdir>/masks/<dataset_id>_merged_mask.ome.zarr`). Do **not** name a CSV column
-`labels_output`.
+`cellpose_halo`, `do_3D`, and `labels_output` (default
+`<outdir>/masks/<dataset_id>_merged_mask.ome.zarr`).
 
 ### 4. Feature extraction
 
@@ -91,7 +90,7 @@ Same columns as [organo_cyte](../organo_cyte/README.md#3-feature-extraction):
 ### Example
 
 ```csv
-dataset_id,input,microscope,output,pixel_size,resampled_output,tile_size_x,tile_size_y,tile_overlap,cellpose_diameter,cellpose_channels,labels_output_final,channels,features_output
+dataset_id,input,microscope,output,pixel_size,resampled_output,tile_size_x,tile_size_y,tile_overlap,cellpose_diameter,cellpose_channels,labels_output,channels,features_output
 sample_01,/g/mif-hd/shared/data/sample_01.ome.tiff,opera,/scratch/user/zarr/sample_01.ome.zarr,1 0.5 0.5,/scratch/user/zarr/sample_01_iso.ome.zarr,2048,2048,128,30,0,/scratch/user/masks/sample_01_mask.ome.zarr,0;1,/scratch/user/features/sample_01.csv
 sample_02,/g/mif-hd/shared/data/sample_02.ome.tiff,opera,,1,,,,,25,0,,,
 ```

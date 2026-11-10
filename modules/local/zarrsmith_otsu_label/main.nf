@@ -1,7 +1,7 @@
 process ZARRSMITH_OTSU_LABEL {
     tag "${meta.id}"
     label 'process_high'
-    container 'ghcr.io/embl-mif/zarrsmith:0.6.5'
+    container 'ghcr.io/embl-mif/zarrsmith:0.6.6'
 
     input:
     tuple val(meta), path(input_zarr)

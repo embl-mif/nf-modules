@@ -2,33 +2,41 @@
 
 Converts microscopy datasets to OME-Zarr, tiles each converted image, segments
 every tile with Cellpose-SAM, matches and merges labels across tile borders
-into an intermediate global mask, converts it to a multiscale label OME-Zarr
-with the same metadata as the converted image, and finally measures the labels
-against the converted image, writing one features CSV per dataset.
+into an intermediate global mask, converts it to a spec-compliant multiscale
+label OME-Zarr with the same pyramid settings as the converted image, and
+finally measures the labels against the converted image, writing one features
+CSV per dataset.
 
 ## Steps
 
 1. `ZARRSMITH_CONVERSION` – convert the input to OME-Zarr (`zarrsmith convert`). Skipped
    if the store already exists.
 2. `TILED_CELLPOSE_SAM_ZARR` (subworkflow) – segment the converted image tile
-   by tile and merge the result into one intermediate label mask, kept only in
-   the Nextflow work directory:
+   by tile, merge the result into one intermediate label mask (kept only in
+   the Nextflow work directory) and convert it into the final label OME-Zarr
+   (`labels_output`):
    1. `TILE_CONSTRUCTOR` – compute the tile grid (and optional ROI).
-   2. `PREALLOCATE_ZARR` – pre-allocate the merged `uint32` label store.
+   2. `PREALLOCATE_ZARR` – pre-allocate the intermediate merged `uint32` label
+      store in the work directory.
    3. `CELLPOSE_SAM_ZARR_MIF` – segment every tile on a GPU. With `-resume`,
       tiles already segmented in a previous run are reused (see
       [Tile segmentations](#tile-segmentations)).
    4. `FIND_TILE_NEIGHBORS` / `LOCAL_LABEL_MATCHER` – match labels between
       neighbouring tiles.
    5. `LABEL_SOLVER` – solve the label-matching graph into a global mapping.
-   6. `WRITE_RELABELED_TILE` – write every tile into the merged label store.
-   7. `POPULATE_PYRAMID` – fill pyramid levels 1..N of the merged mask from
-      the fully written level 0 (nearest-neighbour `Sample`, so label ids are
-      preserved).
-3. `ZARRSMITH_CONVERSION` (zarr → zarr) – convert the intermediate mask into the
-   final label OME-Zarr (`labels_output_final`) with the metadata of the
-   converted OME-Zarr.
-4. `ZARRSMITH_FEATURE_EXTRACTION` – measure the label OME-Zarr against the
+   6. `WRITE_RELABELED_TILE` – write every tile into the intermediate label
+      store.
+   7. `POPULATE_PYRAMID` – fill pyramid levels 1..N of the intermediate mask
+      from the fully written level 0 (nearest-neighbour `Sample`, so label ids
+      are preserved).
+   8. `ZARRSMITH_CONVERT_LABELS` (`ZARRSMITH_CONVERSION`, zarr → zarr) – convert
+      the intermediate mask into the final label OME-Zarr
+      (`labels_output`) with `zarrsmith convert`. The intermediate store
+      does not carry spec-compliant OME-Zarr metadata (e.g. `napari-ome-zarr`
+      cannot open it); the converted one does, and is marked as a label image.
+      Level 0 is copied unchanged and the pyramid is rebuilt with
+      nearest-neighbour downsampling, so label ids are preserved.
+3. `ZARRSMITH_FEATURE_EXTRACTION` – measure the label OME-Zarr against the
    converted OME-Zarr (`skimage.measure.regionprops`) and write a features CSV.
    Runs per dataset once its labels are complete.
 
@@ -37,7 +45,7 @@ against the converted image, writing one features CSV per dataset.
 One dataset per row. Blank cells fall back to the default listed below. Only
 `input` is mandatory. Paths containing commas must be CSV-quoted. A relative
 `input` is resolved against the CSV's own directory; every output column
-(`output`, `labels_output_final`, `features_output`) must be an **absolute**
+(`output`, `labels_output`, `features_output`) must be an **absolute**
 path, or blank to use the default.
 
 ### General
@@ -51,7 +59,7 @@ path, or blank to use the default.
 
 Convert the input into the OME-Zarr used by every later step. All columns are
 optional; unset ones are not passed to `zarrsmith`, so its own defaults apply. The
-same `num_levels`, `downscale_factor`, `zarr_format`, ... are reused when the final
+same `zarr_format`, `num_levels` and `downscale_factor` are reused when the final
 label OME-Zarr is built, so labels and image share the pyramid.
 
 | CSV column | Default if not set | Description |
@@ -106,14 +114,26 @@ All columns are optional.
 
 | CSV column | Default if not set | Description |
 | --- | --- | --- |
-| `labels_output_final` | `<dataset_id>_merged_mask.ome.zarr` in the work dir | Path of the final label OME-Zarr. Absolute path to keep it. |
+| `labels_output` | `<outdir>/masks/<dataset_id>_merged_mask.ome.zarr` | Path of the final label OME-Zarr. |
 
-The tiles are merged into an *intermediate* label mask (pyramid filled by `POPULATE_PYRAMID`) that is
-only kept in the Nextflow work directory. `ZARRSMITH_CONVERSION` (zarr → zarr)
-then converts it into `labels_output_final`, a multiscale label OME-Zarr that
-reuses the conversion settings (axes, scales, pyramid levels, zarr format) of
-the converted image. Do **not** name a CSV column `labels_output`: that would
-be picked up as the intermediate mask location.
+The tiles are merged into an *intermediate* label mask
+(`<dataset_id>_merged_labels_prealloc.ome.zarr`, pyramid filled by
+`POPULATE_PYRAMID`) that is only kept in the Nextflow work directory. As the
+last step of the subworkflow, `ZARRSMITH_CONVERT_LABELS` (zarr → zarr) converts
+it into `labels_output`, a multiscale label OME-Zarr that any OME-Zarr
+reader can open. It is written with the row's `zarr_format`, `num_levels` and
+`downscale_factor` (zarrsmith defaults where blank), i.e. the same values used
+to convert the image, so both share the pyramid. This only holds if the image
+was really built with the row's values: when `output` already existed and its
+conversion was skipped, make sure the row states the settings it was built with
+(e.g. `num_levels` 3, `downscale_factor` `1 2 2`), otherwise the label levels
+above 0 may not match the image (zarrsmith's default also downsamples Z), which
+matters for `labels_resolution_level` / `intensity_resolution_level` > 0.
+
+If a store without OME metadata already exists at `labels_output` (e.g.
+a mask written by an earlier version of this workflow), it is removed and
+rebuilt; a store that already has OME metadata is kept and the conversion is
+skipped.
 
 ### 3. Feature extraction
 
@@ -135,7 +155,7 @@ measured properties and the output column naming.
 ### Example
 
 ```csv
-dataset_id,input,microscope,output,chunk_size,tile_size_x,tile_size_y,tile_overlap,cellpose_diameter,cellpose_channels,do_3D,labels_output_final,channels,features_output
+dataset_id,input,microscope,output,chunk_size,tile_size_x,tile_size_y,tile_overlap,cellpose_diameter,cellpose_channels,do_3D,labels_output,channels,features_output
 sample_01,/g/mif-hd/shared/data/sample_01.ome.tiff,opera,/scratch/user/zarr/sample_01.ome.zarr,1 1 1 512 512,2048,2048,128,30,0,False,/scratch/user/masks/sample_01_mask.ome.zarr,0;1,/scratch/user/features/sample_01.csv
 sample_02,/g/mif-hd/shared/data/sample_02.ome.tiff,opera,,,,,,25,0,False,,,
 ```
@@ -145,7 +165,7 @@ sample_02,/g/mif-hd/shared/data/sample_02.ome.tiff,opera,,,,,,25,0,False,,,
 | Parameter | Default | Purpose |
 | --- | --- | --- |
 | `--input_csv` | – (required) | Input CSV. |
-| `--outdir` | `results` | Base directory for the default features CSV (`<outdir>/measurements`). |
+| `--outdir` | `results` | Base directory for the default label OME-Zarr (`<outdir>/masks`) and features CSV (`<outdir>/measurements`). |
 | `--resolution_level` | `0` | Pyramid level for tiling/segmentation when a row has none. |
 | `--intensity_resolution_level` | `0` | Pyramid level for feature extraction on the image when a row has none. |
 | `--labels_resolution_level` | `0` | Pyramid level for feature extraction on the mask when a row has none. |

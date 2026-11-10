@@ -68,7 +68,7 @@ workflow {
         def do_3D_value = do_3D_text ? do_3D_text.equalsIgnoreCase('true') : false
 
         meta + [
-            labels_output      : Utils.resolveOutput(meta, 'labels_output_final', "${default_labels_dir}/${meta.id}_merged_mask.ome.zarr", meta.id),
+            labels_output      : Utils.resolveOutput(meta, 'labels_output', "${default_labels_dir}/${meta.id}_merged_mask.ome.zarr", meta.id),
 
             tile_size_x        : tile_size_x  ? tile_size_x  as int   : null,
             tile_size_y        : tile_size_y  ? tile_size_y  as int   : null,
@@ -102,8 +102,9 @@ workflow {
         multicut_beta,
     )
 
-    TILED_CELLPOSE_SAM_ZARR.out.labels.view { meta, mask_path ->
-        "[TILED_CELLPOSE_SAM_ZARR] ${meta.id}: final label OME-Zarr ready at ${mask_path}"
+    // mask_path is the work-dir symlink; meta.zarr_output is where the store really lives.
+    TILED_CELLPOSE_SAM_ZARR.out.labels.view { meta, _mask_path ->
+        "[TILED_CELLPOSE_SAM_ZARR] ${meta.id}: final label OME-Zarr ready at ${meta.zarr_output}"
     }
 
     feature_inputs_ch = ch_images
