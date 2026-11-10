@@ -1,7 +1,7 @@
 process ZARRSMITH_ENDOMORPH_REGIONS {
     tag "${meta.id}"
     label 'process_medium'
-    container 'ghcr.io/embl-mif/zarrsmith:0.6.5'
+    container 'ghcr.io/embl-mif/zarrsmith:0.6.6'
 
     input:
     // nucleus_zarr: the clean-channel zarr, whose "<channel>_clean" nuclei are never gap.
