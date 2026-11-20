@@ -1,11 +1,9 @@
 include { TILE_CONSTRUCTOR      } from '../../../modules/local/tileconstructor/main'
 include { CELLPOSE_SAM_ZARR_MIF } from '../../../modules/local/cellpose_sam_zarr_mif/main'
-include { PREALLOCATE_ZARR      } from '../../../modules/local/preallocate_zarr/main'
-include { POPULATE_PYRAMID      } from '../../../modules/local/populate_pyramid/main'
 include { FIND_TILE_NEIGHBORS   } from '../../../modules/local/find_tile_neighbors/main'
 include { LOCAL_LABEL_MATCHER   } from '../../../modules/local/local_label_matcher/main'
 include { LABEL_SOLVER          } from '../../../modules/local/label_solver/main'
-include { WRITE_RELABELED_TILE  } from '../../../modules/local/write_relabeled_tile/main'
+include { ZARRSMITH_FUSE_LABELS } from '../../../modules/local/zarrsmith_fuse_labels/main'
 
 workflow TILED_CELLPOSE_SAM_ZARR {
 
@@ -24,7 +22,6 @@ workflow TILED_CELLPOSE_SAM_ZARR {
     def tileConstructorKeys = ['halo', 'resolution_level', 'tile_overlap', 'tile_size_x', 'tile_size_y', 'tile_size_z',
                                'use_physical_units', 'x_min', 'x_max', 'y_min', 'y_max', 'z_min', 'z_max']
     def cellposeKeys = ['diameter', 'niter', 'segmentation_channels', 'flow_threshold', 'cellprob_threshold', 'halo']
-    def labelDownsampleMethod = 'Sample'
 
     ch_split_images = ch_images.map { meta, image ->
         def (localImage, imageUri) = Utils.splitImageInput(image, noImageSentinel)
@@ -32,18 +29,6 @@ workflow TILED_CELLPOSE_SAM_ZARR {
     }
 
     TILE_CONSTRUCTOR( ch_split_images.map { id, meta, image, localImage, imageUri -> tuple(meta.subMap(tileConstructorKeys) + [id: meta.id], localImage, imageUri) } )
-
-    ch_merged_zarr_input = TILE_CONSTRUCTOR.out.tiles
-        .map { parentMeta, tileCsv -> tuple(parentMeta.id, tileCsv) }
-        .join( ch_split_images.map { id, meta, image, localImage, imageUri -> tuple(id, meta, localImage, imageUri) } )
-        .map { srcId, tileCsv, parentMeta, localImage, imageUri ->
-            def mergedOutputZarr = Utils.resolveOutput(parentMeta, 'labels_output', "${srcId}_merged_labels.ome.zarr", srcId)
-            def mergedMeta = [id: srcId, dtype: 'uint32', data_type: 'label', zarr_output: mergedOutputZarr]
-            tuple(mergedMeta, localImage, imageUri, tileCsv)
-        }
-
-    PREALLOCATE_ZARR(ch_merged_zarr_input)
-    ch_versions = ch_versions.mix(PREALLOCATE_ZARR.out.versions)
 
     ch_image_tiles = TILE_CONSTRUCTOR.out.tiles
         .map { parentMeta, tileCsv -> tuple(parentMeta.id, tileCsv) }
@@ -143,46 +128,30 @@ workflow TILED_CELLPOSE_SAM_ZARR {
 
     LABEL_SOLVER(ch_local_graphs_grouped)
 
-    ch_write_tile_input = ch_all_labels
-        .map { meta, label -> tuple(meta.id, meta + [label_offset_step: val_label_offset_step], label) }
-        .join(
-            FIND_TILE_NEIGHBORS.out.tile_neighbors.flatMap { _srcMeta, csv ->
-                csv.splitCsv(header: true).collect { row -> tuple(row.dataset_id, row) }
-            }
-        )
-        .map { _tileId, meta, label, neighborRow ->
-            def fullMeta = meta + [
-                right_dataset_id : neighborRow.right_dataset_id,
-                bottom_dataset_id: neighborRow.bottom_dataset_id,
-                behind_dataset_id: neighborRow.behind_dataset_id,
+    // One fusion per source image: every tile store (placed by its own NGFF translation),
+    // the tile indices that set each tile's label offset, and the solver's mapping.
+    ch_fuse_input = ch_all_labels
+        .map { meta, label -> tuple(meta.source_dataset_id, label) }
+        .groupTuple()
+        .join( ch_tiles_and_segmentations_csv )
+        .join( LABEL_SOLVER.out.global_mapping.map { meta, json -> tuple(meta.id, json) } )
+        .join( ch_split_images.map { id, meta, image, localImage, imageUri -> tuple(id, meta, localImage, imageUri) } )
+        .map { srcId, labels, tilesCsv, mapping, parentMeta, localImage, imageUri ->
+            def mergedMeta = [
+                id               : srcId,
+                dtype            : 'uint32',
+                data_type        : 'label',
+                zarr_output      : Utils.resolveOutput(parentMeta, 'labels_output', "${srcId}_merged_labels.ome.zarr", srcId),
+                label_offset_step: val_label_offset_step,
+                resolution_level : parentMeta.resolution_level,
             ]
-            tuple(meta.source_dataset_id, fullMeta, label)
-        }
-        .combine( TILE_CONSTRUCTOR.out.tiles.map { parentMeta, tileCsv -> tuple(parentMeta.id, tileCsv) }, by: 0 )
-        .combine( PREALLOCATE_ZARR.out.zarr.map { meta, store -> tuple(meta.id, store) }, by: 0 )
-        .combine( LABEL_SOLVER.out.global_mapping.map { meta, json -> tuple(meta.id, json) }, by: 0 )
-        .map { _srcId, fullMeta, label, tileCsv, store, mapping ->
-            tuple(fullMeta, label, tileCsv, store, mapping)
+            tuple(mergedMeta, labels, tilesCsv, mapping, localImage, imageUri)
         }
 
-    WRITE_RELABELED_TILE(ch_write_tile_input)
-
-
-    ch_write_confirmed = WRITE_RELABELED_TILE.out.write_confirmation
-        .map { meta, confirmation -> tuple(meta.source_dataset_id, confirmation) }
-        .groupTuple(by: 0)
-
-    ch_labels_ready = PREALLOCATE_ZARR.out.zarr
-        .map { meta, store -> tuple(meta.id, meta, store) }
-        .join( ch_write_confirmed )
-        .map { _srcId, meta, store, _confirmations -> tuple(meta, store) }
-
-    POPULATE_PYRAMID(
-        ch_labels_ready.map { meta, store -> tuple(meta, store, labelDownsampleMethod) }
-    )
-    ch_versions = ch_versions.mix(POPULATE_PYRAMID.out.versions)
+    ZARRSMITH_FUSE_LABELS(ch_fuse_input)
+    ch_versions = ch_versions.mix(ZARRSMITH_FUSE_LABELS.out.versions)
 
     emit:
-    labels   = POPULATE_PYRAMID.out.zarr
+    labels   = ZARRSMITH_FUSE_LABELS.out.zarr
     versions = ch_versions
 }

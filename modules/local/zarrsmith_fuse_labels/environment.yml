@@ -1,0 +1,11 @@
+name: zarrsmith_fuse_labels
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - git
+  - pip
+  - pip:
+      # store_tiles/RelabeledArray are not released yet; pin a release once they are.
+      - "zarrsmith @ git+https://github.com/embl-mif/zarrsmith.git@consolidated_translation"

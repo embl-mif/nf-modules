@@ -58,6 +58,46 @@ def _omero_channels(num_channels: int, channel_labels: list[str] | None, dtype: 
     ]
 
 
+def _ngff_attrs(ome_attrs: dict, ome_version: str, data_type: str | None) -> dict:
+    """Lay out the NGFF metadata (multiscales, optional omero) as root attrs.
+
+    The flat multiscales/omero copy is always written: squirrel's
+    OMEZarrStore (used by populate_pyramid.py) only reads attrs["multiscales"]
+    and never looks under a nested "ome" key, even for zarr v3.
+
+    For NGFF 0.5 (zarr v3), the spec-compliant "ome" wrapper is written as
+    well, because ome-zarr-py (and so napari-ome-zarr) reads *only* that key
+    for v3 stores. Readers of either layout ignore the other one.
+
+    For label outputs, "image-label" is added so viewers load the store as a
+    label layer instead of an intensity image.
+    """
+    attrs = dict(ome_attrs)
+    image_label = None
+    if data_type == "label":
+        image_label = {"version": ome_version} if ome_version == "0.4" else {}
+        attrs["image-label"] = image_label
+
+    if ome_version == "0.5":
+        nested = {"version": "0.5"}
+        # In NGFF 0.5 the version lives on the "ome" object, not on each
+        # multiscales entry.
+        nested["multiscales"] = [
+            {key: value for key, value in ms.items() if key != "version"}
+            for ms in ome_attrs["multiscales"]
+        ]
+        if "omero" in ome_attrs:
+            nested["omero"] = ome_attrs["omero"]
+        if image_label is not None:
+            nested["image-label"] = image_label
+            # 0.5 keeps image-label only under "ome"; nothing in this
+            # pipeline reads the flat key, so don't duplicate it.
+            del attrs["image-label"]
+        attrs["ome"] = nested
+
+    return attrs
+
+
 def _rescale_crop_bound(value: float, base_scale: float, level_scale: float) -> float:
     """Rescale one crop endpoint given in the finest included level's voxel
     coordinates into another level's voxel coordinates, using the ratio of
@@ -294,17 +334,9 @@ def _build_from_input(output_path: str, dtype: str, input_path: str,
         channel_count = num_channels if num_channels is not None else shapes[0][output_axis_names.index("c")]
         new_ome_attrs["omero"] = {"channels": _omero_channels(channel_count, channel_labels, dtype)}
 
-    # Always write multiscales/omero flat at the attrs root, regardless of
-    # output zarr_format. This is NOT the real NGFF spec (which nests under
-    # "ome" for zarr v3) -- it matches squirrel's own OMEZarrMetadata reader/
-    # writer instead, which downstream tools in this pipeline (e.g.
-    # populate_pyramid.py, via squirrel.OMEZarrStore) actually rely on:
-    # squirrel's detect_ome_version() only ever checks attrs["multiscales"]
-    # directly and never looks for a nested "ome" key, even for zarr v3.
-    zattrs.pop("multiscales", None)
-    zattrs.pop("omero", None)
-    zattrs.pop("ome", None)
-    zattrs.update(new_ome_attrs)
+    for key in ("multiscales", "omero", "ome", "image-label"):
+        zattrs.pop(key, None)
+    zattrs.update(_ngff_attrs(new_ome_attrs, ome_version, zattrs.get("data_type")))
 
     dest_root.attrs.update(zattrs)
 
@@ -348,7 +380,7 @@ def _build_explicit(output_path: str, dtype: str,
 
     ome_version = "0.5" if zarr_format == 3 else "0.4"
 
-    zattrs = {
+    ome_attrs = {
         "multiscales": [{
             "version": ome_version,
             "name": "/",
@@ -363,12 +395,13 @@ def _build_explicit(output_path: str, dtype: str,
             "type": "identity",
         }]
     }
-    if data_type is not None:
-        zattrs["data_type"] = data_type
-
     if "c" in axis_names and channel_labels is not None:
         c_axis = axis_names.index("c")
-        zattrs["omero"] = {"channels": _omero_channels(shape[c_axis], channel_labels, dtype)}
+        ome_attrs["omero"] = {"channels": _omero_channels(shape[c_axis], channel_labels, dtype)}
+
+    zattrs = _ngff_attrs(ome_attrs, ome_version, data_type)
+    if data_type is not None:
+        zattrs["data_type"] = data_type
 
     dest_root.attrs.update(zattrs)
 
