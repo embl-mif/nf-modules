@@ -3,9 +3,18 @@ process CELLPOSE_SAM_ZARR_MIF {
     label "process_high"
     label "gpu"
 
-    // Catch GPU OOM errors
+    // Retry GPU OOM / GPU init errors, and jobs killed for host memory or time (137, 140):
+    // each retry doubles memory and time. This replaces base.config's
+    // errorStrategy, so the exit codes it retries have to be listed here too.
     // FIXME: Also add retries for out of time
     errorStrategy {
+        if (task.exitStatus in [137, 140]) {
+            log.warn(
+                "Retrying ${task.process} [${task.tag}] attempt ${task.attempt}/${task.maxRetries + 1} " +
+                "(cause=HOST_OOM_OR_TIME, exit=${task.exitStatus}, jobId=${task.native_id}, workDir=${task.workDir})"
+            )
+            return 'retry'
+        }
         def errFile = new File("${task.workDir}/.command.err")
         def stderr = errFile.exists() ? errFile.text : ""
         def lowered = stderr.toLowerCase()
