@@ -219,7 +219,8 @@ Parameters: `--input_csv`, `--ilastik_project`, `--outdir` (default `results`).
 | `input_image_path` | **Required.** Input OME-Zarr. |
 | `dataset_id` | Defaults to `<input basename>_<row number>`. |
 | `pixel_class_output` | Output store. Defaults to `<outdir>/pixel_class/<dataset_id>_pixel_class.zarr`. |
-| `tile_size_x`, `tile_size_y`, `tile_size_z`, `tile_overlap`, `halo` | Tiling. |
+| `tile_size_x`, `tile_size_y`, `tile_size_z`, `tile_overlap`, `halo` | Tiling. An axis without a tile size is one tile, unless `max_tile_voxels` is set. |
+| `max_tile_voxels` | Most voxels one tile may read, halo included: axes without a tile size are cut to fit it. |
 | `resolution_level`, `use_physical_units` | Pyramid level and units. |
 | `x_min` ... `z_max`, `t_min`, `t_max` | Region of interest and time range. |
 

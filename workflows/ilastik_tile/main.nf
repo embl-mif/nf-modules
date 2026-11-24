@@ -43,6 +43,7 @@ workflow {
         def tile_size_z  = Utils.normalizeOptionalText(meta.tile_size_z)
         def tile_overlap = Utils.normalizeOptionalText(meta.tile_overlap)
         def halo         = Utils.normalizeOptionalText(meta.halo)
+        def max_tile_voxels = Utils.normalizeOptionalText(meta.max_tile_voxels)
 
         def resolution_level   = Utils.normalizeOptionalText(meta.resolution_level)
         def use_physical_units = Utils.normalizeOptionalText(meta.use_physical_units)
@@ -62,6 +63,8 @@ workflow {
             tile_size_z        : tile_size_z  ? tile_size_z  as int   : null,
             tile_overlap       : tile_overlap ? tile_overlap as float : null,
             halo               : halo ? halo as float : null,
+            // axes without a tile size are cut to fit this budget; without either they are one tile
+            max_tile_voxels    : max_tile_voxels ? new BigDecimal(max_tile_voxels).toBigInteger() : null,
             resolution_level   : resolution_level ? resolution_level as int : null,
             use_physical_units : use_physical_units ? use_physical_units.toBoolean() : false,
 

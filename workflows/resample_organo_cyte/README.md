@@ -74,7 +74,7 @@ neighbour. See [ZARRSMITH_RESAMPLE](../../modules/local/zarrsmith_resample/READM
 ### 3. Tiled Cellpose-SAM segmentation
 
 Same columns as [organo_cyte](../organo_cyte/README.md#2-tiled-cellpose-sam-segmentation):
-`tile_size_x`, `tile_size_y`, `tile_size_z`, `tile_overlap`, `resolution_level`,
+`tile_size_x`, `tile_size_y`, `tile_size_z`, `max_tile_voxels`, `tile_resize`, `tile_overlap`, `resolution_level`,
 `use_physical_units`, `x_min` ... `z_max`, `cellpose_channels`, `cellpose_diameter`,
 `cellpose_niter`, `cellpose_flow_threshold`, `cellpose_cellprob_threshold`,
 `cellpose_halo`, `do_3D`, and `labels_output_final` (default

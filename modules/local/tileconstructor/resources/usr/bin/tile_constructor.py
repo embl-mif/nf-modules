@@ -1,426 +1,168 @@
 #!/usr/bin/env python3
 
-"""Construct regular tiles for an OME-Zarr image and write tile bounds to CSV.
+"""Cut an OME-Zarr image into regular tiles and write their bounds to a CSV.
 
-The output bounds are always written in voxel units as half-open intervals
-[min, max) for each spatial axis.
+The tiles are planned by ZarrSmith (`zarrsmith.utils.tiling.plan_tiles`), from the
+image as ZarrSmith reads it (shape, scale and NGFF translation of the chosen
+resolution level), so the tiles agree with the later ZarrSmith steps
+(ZARRSMITH_FUSE_LABELS).
 
-Rows are emitted in the canonical Cellpose table shape to avoid downstream
-schema adaptation. The dataset_id is unique per tile and formed as
-<source_dataset_id>__<tile_id>.
+Tile sizes: an axis given a --tile-size-<ax> is cut at that size. An axis without
+one is cut only when a tile would read more than --max-tile-voxels voxels (halo
+included, times --resize ** ndim): ZarrSmith then picks the tile counts with the least
+cut area that fit. Without --max-tile-voxels, an axis without a tile size is one tile.
+
+Bounds are in voxels of the chosen level, as half-open intervals [min, max). Each row
+has a unique dataset_id, <source_dataset_id>__<tile_id>. Tiles are numbered from 1, x
+fastest, then y, then z.
 """
 
 import argparse
 import csv
 import math
-from typing import Any
 
-import ngff_zarr as nz
+from zarrsmith.microscope_manager import ZarrManager
+from zarrsmith.utils.tiling import plan_tiles
 
-
-def _normalize_bounds_arg(
-    min_value: float | None,
-    max_value: float | None,
-    axis_name: str,
-) -> tuple[float | None, float | None] | None:
-    if min_value is None and max_value is None:
-        return None
-
-    start = float(min_value) if min_value is not None else None
-    end = float(max_value) if max_value is not None else None
-    if start is not None and end is not None and end <= start:
-        raise ValueError(f"{axis_name}-bounds are invalid: min={start} must be < max={end}")
-    return start, end
+FIELDNAMES = [
+    "dataset_id", "source_dataset_id", "tile_id", "tile_index", "input_uri",
+    "x_min", "x_max", "y_min", "y_max", "z_min", "z_max", "resolution_level",
+    "tile_overlap_x", "tile_overlap_y", "tile_overlap_z",
+    "tile_size_x", "tile_size_y", "tile_size_z",
+]
 
 
-def _resolve_spatial_roi(
-    data: Any,
-    dims: list[str],
-    scales: dict[str, float],
-    translation: dict[str, float],
-    x_min: float | None,
-    x_max: float | None,
-    y_min: float | None,
-    y_max: float | None,
-    z_min: float | None,
-    z_max: float | None,
-    use_physical_units: bool,
-) -> dict[str, tuple[int, int]]:
-    x_bounds = _normalize_bounds_arg(x_min, x_max, "x")
-    y_bounds = _normalize_bounds_arg(y_min, y_max, "y")
-    z_bounds = _normalize_bounds_arg(z_min, z_max, "z")
+def _level_geometry(image: str, level: int) -> tuple[dict, dict, dict]:
+    """(shape, scale, translation) of the spatial axes of ``level``, by axis name."""
+    md = ZarrManager(image, mode="r").metadata
+    n_levels = len(md["size"])
+    if not 0 <= level < n_levels:
+        raise ValueError(f"--resolution-level {level} is out of range for an input with {n_levels} level(s).")
+    axes = list(md["axes"])
+    spatial = [ax for ax in axes if ax in "zyx"]
+    if "x" not in spatial or "y" not in spatial:
+        raise ValueError(f"The input must have x and y axes, got {''.join(axes)!r}.")
+    shape = dict(zip(axes, md["size"][level]))
+    scale = dict(zip(spatial, md["scales"][level]))
+    translations = md.get("translations") or []
+    translation = dict(translations[level]) if level < len(translations) and translations[level] else {}
+    return {ax: int(shape[ax]) for ax in spatial}, scale, translation
 
-    if "x" not in dims or "y" not in dims:
-        raise ValueError(f"Input dims must contain x and y axes, got {dims}")
 
-    has_z_axis = "z" in dims
-    if z_bounds is not None and not has_z_axis:
-        raise ValueError("Input has no z dimension, but --z-min/--z-max was provided")
-
-    resolved_bounds: dict[str, tuple[int, int]] = {}
-    for dim in ("x", "y", "z"):
-        if dim not in dims:
+def _roi(args, axes, physical: bool) -> dict:
+    """``{axis: (start, stop)}`` from --<ax>-min/--<ax>-max; voxel bounds widened to whole voxels."""
+    roi = {}
+    for ax in "zyx":
+        lo, hi = getattr(args, f"{ax}_min"), getattr(args, f"{ax}_max")
+        if lo is None and hi is None:
             continue
-
-        axis = dims.index(dim)
-        axis_size = int(data.shape[axis])
-        scale = float(scales.get(dim, 1.0))
-        if scale <= 0.0:
-            raise ValueError(f"{dim} scale must be > 0, got {scale}")
-        offset = float(translation.get(dim, 0.0))
-
-        if dim == "x":
-            interval = x_bounds
-        elif dim == "y":
-            interval = y_bounds
-        else:
-            interval = z_bounds
-
-        if interval is None:
-            start, end = 0, axis_size
-        else:
-            start_input, end_input = interval
-            if use_physical_units:
-                if start_input is None:
-                    start = 0
-                else:
-                    relative_start = (start_input - offset) / scale
-                    start = int(math.floor(relative_start + 1e-9))
-
-                if end_input is None:
-                    end = axis_size
-                else:
-                    relative_end = (end_input - offset) / scale
-                    end = int(math.ceil(relative_end - 1e-9))
-
-                if (start_input is not None and start < 0) or (end_input is not None and end > axis_size):
-                    raise ValueError(
-                        f"{dim}-bounds [{start_input}, {end_input}) are outside the image extent "
-                        f"[{offset}, {offset + (axis_size * scale)}) at the selected resolution level"
-                    )
-            else:
-                if start_input is None:
-                    start = 0
-                else:
-                    start = int(math.floor(start_input + 1e-9))
-
-                if end_input is None:
-                    end = axis_size
-                else:
-                    end = int(math.ceil(end_input - 1e-9))
-
-                if (start_input is not None and start < 0) or (end_input is not None and end > axis_size):
-                    raise ValueError(
-                        f"{dim}-bounds [{start_input}, {end_input}) in voxel units are outside the image extent "
-                        f"[0, {axis_size}) at the selected resolution level"
-                    )
-
-            if end <= start:
-                raise ValueError(
-                    f"{dim}-bounds produce an empty ROI after conversion: start={start}, end={end}"
-                )
-
-        resolved_bounds[dim] = (start, end)
-
-    return resolved_bounds
+        if ax not in axes:
+            raise ValueError(f"The input has no {ax} axis, but --{ax}-min/--{ax}-max was given.")
+        if lo is not None and hi is not None and hi <= lo:
+            raise ValueError(f"{ax} bounds are invalid: min={lo} must be < max={hi}.")
+        if not physical:
+            lo = None if lo is None else int(math.floor(lo + 1e-9))
+            hi = None if hi is None else int(math.ceil(hi - 1e-9))
+        roi[ax] = (lo, hi)
+    return roi
 
 
-def _to_voxel_size(size: float, scale: float, axis_name: str, use_physical_units: bool) -> int:
-    if size <= 0.0:
-        raise ValueError(f"tile size for axis '{axis_name}' must be > 0, got {size}")
-    if use_physical_units:
-        voxels = int(math.ceil((size / scale) - 1e-9))
-    else:
-        voxels = int(math.ceil(size - 1e-9))
-    return max(1, voxels)
+def _whole(value, name):
+    """Voxel lengths must be whole numbers for plan_tiles; accept 512.0 from Nextflow."""
+    if value is None:
+        return None
+    if float(value) != int(value):
+        raise ValueError(f"{name} in voxels must be a whole number, got {value}; use --use-physical-units for units.")
+    return int(value)
 
 
-def _to_voxel_overlap(overlap: float, scale: float, axis_name: str, use_physical_units: bool) -> int:
-    if overlap < 0.0:
-        raise ValueError(f"tile overlap for axis '{axis_name}' must be >= 0, got {overlap}")
-    if use_physical_units:
-        voxels = int(math.ceil((overlap / scale) - 1e-9))
-    else:
-        voxels = int(math.ceil(overlap - 1e-9))
-    return max(0, voxels)
+def construct_tiles(args) -> None:
+    physical = bool(args.use_physical_units)
+    shape, scale, translation = _level_geometry(args.input_image_path, args.resolution_level)
+    axes = tuple(ax for ax in "zyx" if ax in shape)
 
+    sizes = {ax: getattr(args, f"tile_size_{ax}") for ax in axes}
+    sizes = {ax: v for ax, v in sizes.items() if v is not None}
+    overlap, halo = args.tile_overlap, args.halo
+    if not physical:
+        sizes = {ax: _whole(v, f"--tile-size-{ax}") for ax, v in sizes.items()}
+        overlap, halo = _whole(overlap, "--tile-overlap"), _whole(halo, "--halo")
 
-def _axis_tiles(start: int, end: int, tile_size: int, overlap: int, halo: int) -> list[tuple[int, int]]:
-    if tile_size <= overlap:
-        raise ValueError(
-            f"tile_size ({tile_size}) must be greater than overlap ({overlap}) for each tiled axis"
-        )
-
-    axis_length = end - start
-    if axis_length <= 0:
-        raise ValueError(f"invalid axis bounds [{start}, {end})")
-
-    # A tile smaller than this can't be segmented reliably -- even a nonzero halo of 1 voxel
-    # isn't enough context for Cellpose, so this is a floor, not just "use halo directly".
-    min_tile_size = max(halo, 2)
-
-    step = tile_size - overlap
-    tiles: list[tuple[int, int]] = []
-    current_start = start
-
-    while current_start < end:
-        # Clamp every tile to the ROI/image boundary (not just the last one): if the axis is
-        # shorter than a single tile_size, more than one iteration could otherwise overrun
-        # before the loop below spots it. Stopping as soon as a tile's *clamped* end reaches
-        # `end` (rather than pre-checking the next tile's unclamped start, as the old code did)
-        # is what makes that safe -- the old check could still fire "keep going" after a tile
-        # had already been clamped all the way to the boundary, producing a nonsensical extra
-        # tile past where the ROI already ended.
-        current_end = min(current_start + tile_size, end)
-        tiles.append((current_start, current_end))
-        if current_end >= end:
-            break
-        current_start += step
-
-    # If clamping left the last tile too small to segment, fold it into its predecessor
-    # instead of keeping it as its own (undersized) tile.
-    if len(tiles) > 1:
-        last_start, last_end = tiles[-1]
-        if last_end - last_start < min_tile_size:
-            tiles.pop()
-            prev_start, _prev_end = tiles[-1]
-            tiles[-1] = (prev_start, last_end)
-    # NOTE: if the whole ROI/axis produces only a single tile (len(tiles) == 1) and that tile
-    # is itself smaller than min_tile_size, there's no predecessor to merge into -- it's left
-    # as-is here. Revisit (e.g. raise instead) if this turns out to happen often in practice.
-
-    return tiles
-
-
-def construct_tiles(
-    source_dataset_id: str,
-    input_image_path: str,
-    output_csv: str,
-    tile_size_x: float | None,
-    tile_size_y: float | None,
-    tile_size_z: float | None,
-    tile_overlap: float,
-    resolution_level: int,
-    x_min: float | None,
-    x_max: float | None,
-    y_min: float | None,
-    y_max: float | None,
-    z_min: float | None,
-    z_max: float | None,
-    use_physical_units: bool,
-    halo: float = 0.0,
-) -> None:
-    multiscales = nz.from_ngff_zarr(input_image_path)
-    if resolution_level < 0:
-        raise ValueError(f"--resolution-level must be >= 0, got {resolution_level}")
-    if resolution_level >= len(multiscales.images):
-        raise ValueError(
-            f"--resolution-level {resolution_level} is out of range for input with {len(multiscales.images)} level(s)"
-        )
-
-    ngff_image = multiscales.images[resolution_level]
-    data = ngff_image.data
-    dims = list(ngff_image.dims)
-    scales = {dim: float(ngff_image.scale.get(dim, 1.0)) for dim in dims}
-    translation = {dim: float((getattr(ngff_image, "translation", {}) or {}).get(dim, 0.0)) for dim in dims}
-
-    roi_bounds = _resolve_spatial_roi(
-        data=data,
-        dims=dims,
-        scales=scales,
+    plan = plan_tiles(
+        shape,
+        tile_size=sizes or None,
+        overlap=overlap,
+        halo=halo,
+        roi=_roi(args, axes, physical) or None,
+        scale=scale,
         translation=translation,
-        x_min=x_min,
-        x_max=x_max,
-        y_min=y_min,
-        y_max=y_max,
-        z_min=z_min,
-        z_max=z_max,
-        use_physical_units=use_physical_units,
+        physical=physical,
+        level=args.resolution_level,
+        max_tile_voxels=args.max_tile_voxels,
+        resize=args.resize,
     )
 
-    chunk_shape = getattr(data, "chunksize", None)
+    rows = []
+    for tile in plan.tiles:
+        row = {key: "" for key in FIELDNAMES}
+        row.update({
+            "dataset_id": f"{args.source_dataset_id}__{tile.tile_id}",
+            "source_dataset_id": args.source_dataset_id,
+            "tile_id": tile.tile_id,
+            "tile_index": tile.index,
+            "input_uri": args.input_image_path,
+            "resolution_level": plan.level,
+        })
+        for ax in plan.axes:
+            row[f"{ax}_min"], row[f"{ax}_max"] = tile.bounds[ax]
+            row[f"tile_overlap_{ax}"] = plan.overlap[ax]
+            # the planned tile size (constant over the rows of one image), not this tile's own
+            row[f"tile_size_{ax}"] = plan.tile_size[ax]
+        rows.append(row)
 
-    def _chunk_size_for(axis: str) -> int:
-        if chunk_shape is None:
-            raise ValueError(
-                f"--tile-size-{axis} was not provided and the input store has no "
-                f"readable chunk shape to fall back on"
-            )
-        return int(chunk_shape[dims.index(axis)])
-
-    tile_sizes_voxel: dict[str, int] = {
-        "x": (
-            _to_voxel_size(tile_size_x, scales["x"], "x", use_physical_units)
-            if tile_size_x is not None
-            else _chunk_size_for("x")
-        ),
-        "y": (
-            _to_voxel_size(tile_size_y, scales["y"], "y", use_physical_units)
-            if tile_size_y is not None
-            else _chunk_size_for("y")
-        ),
-    }
-    if "z" in roi_bounds:
-        tile_sizes_voxel["z"] = (
-            _to_voxel_size(tile_size_z, scales["z"], "z", use_physical_units)
-            if tile_size_z is not None
-            else _chunk_size_for("z")
-        )
-
-    overlap_voxel = {
-        axis: _to_voxel_overlap(tile_overlap, scales[axis], axis, use_physical_units)
-        for axis in roi_bounds
-    }
-    # Same conversion as tile_overlap (ceil to voxels, physical-unit-aware) -- halo is a
-    # different quantity (Cellpose's segmentation-context margin, see cellpose_sam_zarr.py),
-    # but the unit conversion itself is identical, so _to_voxel_overlap is reused as-is.
-    halo_voxel = {
-        axis: _to_voxel_overlap(halo, scales[axis], axis, use_physical_units)
-        for axis in roi_bounds
-    }
-
-    axis_tiles = {
-        axis: _axis_tiles(
-            start=roi_bounds[axis][0],
-            end=roi_bounds[axis][1],
-            tile_size=tile_sizes_voxel[axis],
-            overlap=overlap_voxel[axis],
-            halo=halo_voxel[axis],
-        )
-        for axis in roi_bounds
-    }
-
-    rows: list[dict[str, Any]] = []
-    tile_index = 0
-
-    z_tiles = axis_tiles.get("z", [(0, 1)])
-    for z_bounds_vox in z_tiles:
-        for y_bounds_vox in axis_tiles["y"]:
-            for x_bounds_vox in axis_tiles["x"]:
-                tile_index += 1
-                row: dict[str, Any] = {
-                    "tile_id": f"tile_{tile_index:06d}",
-                    "tile_index": tile_index,
-                    "source_dataset_id": source_dataset_id,
-                    "dataset_id": "",
-                    "input_uri": input_image_path,
-                    "x_min": x_bounds_vox[0],
-                    "x_max": x_bounds_vox[1],
-                    "y_min": y_bounds_vox[0],
-                    "y_max": y_bounds_vox[1],
-                    "z_min": "",
-                    "z_max": "",
-                    "resolution_level": int(resolution_level),
-                    "tile_overlap_x": overlap_voxel["x"],
-                    "tile_overlap_y": overlap_voxel["y"],
-                    "tile_overlap_z": "",
-                    # The *requested* tile size, not this tile's own (possibly clamped/merged,
-                    # see gap #11) width -- constant across every row of one source image, so
-                    # Module 6a/6b can read it off any row to derive the output store's
-                    # per-axis chunk size (tile_size - tile_overlap, the tiling stride).
-                    "tile_size_x": tile_sizes_voxel["x"],
-                    "tile_size_y": tile_sizes_voxel["y"],
-                    "tile_size_z": "",
-                }
-                row["dataset_id"] = f"{source_dataset_id}__{row['tile_id']}"
-                if "z" in roi_bounds:
-                    row["z_min"] = z_bounds_vox[0]
-                    row["z_max"] = z_bounds_vox[1]
-                    row["tile_overlap_z"] = overlap_voxel["z"]
-                    row["tile_size_z"] = tile_sizes_voxel["z"]
-                rows.append(row)
-
-    with open(output_csv, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=[
-                "dataset_id",
-                "source_dataset_id",
-                "tile_id",
-                "tile_index",
-                "input_uri",
-                "x_min",
-                "x_max",
-                "y_min",
-                "y_max",
-                "z_min",
-                "z_max",
-                "resolution_level",
-                "tile_overlap_x",
-                "tile_overlap_y",
-                "tile_overlap_z",
-                "tile_size_x",
-                "tile_size_y",
-                "tile_size_z",
-            ],
-        )
+    with open(args.output_csv, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDNAMES)
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"Wrote {len(rows)} tile(s) to {output_csv}")
+    counts = " x ".join(f"{plan.counts[ax]} ({ax})" for ax in plan.axes)
+    print(f"Wrote {len(rows)} tile(s) to {args.output_csv}: {counts}, tile size {plan.tile_size}, "
+          f"overlap {plan.overlap}, halo {plan.halo}, largest read {plan.max_load_voxels} voxels")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--source-dataset-id", required=True)
+    parser.add_argument("--input-image-path", required=True)
+    parser.add_argument("--output-csv", required=True)
 
-    parser.add_argument("--source-dataset-id", type=str, required=True)
-    parser.add_argument("--input-image-path", type=str, required=True)
-    parser.add_argument("--output-csv", type=str, required=True)
-
-    parser.add_argument("--tile-size-x", type=float, default=None, help="Tile size along x. If omitted, derived from the input store's own chunk "
-        "shape at --resolution-level.",)
-    parser.add_argument("--tile-size-y", type=float, default=None,
-        help="Tile size along y. If omitted, derived from the input store's own chunk "
-        "shape at --resolution-level.",)
-    parser.add_argument("--tile-size-z", type=float, default=None, help="Tile size along z, when the input has a z axis. If omitted, derived from "
-        "the input store's own chunk shape at --resolution-level.",)
-
+    for ax in "xyz":
+        parser.add_argument(f"--tile-size-{ax}", type=float, default=None,
+                            help=f"Tile size along {ax}. Default: not split, unless --max-tile-voxels cuts it.")
+    parser.add_argument("--max-tile-voxels", type=int, default=None,
+                        help="Most voxels one tile may read, halo included (e.g. what fits in GPU or host "
+                             "memory). Axes without a tile size are cut to fit it.")
+    parser.add_argument("--resize", type=float, default=1.0,
+                        help="Linear factor by which the tool enlarges each tile before processing "
+                             "(e.g. 30 / diameter for Cellpose); the budget is checked on voxels * resize ** ndim.")
     parser.add_argument("--tile-overlap", type=float, default=0.0)
     parser.add_argument("--resolution-level", type=int, default=0)
-    parser.add_argument(
-        "--halo",
-        type=float,
-        default=0.0,
-        help="Cellpose segmentation-context halo (same units as --tile-overlap), used only to "
-        "keep a boundary tile from being clamped smaller than Cellpose can segment.",
-    )
+    parser.add_argument("--halo", type=float, default=0.0,
+                        help="Context read around each tile by the next step (same units as --tile-overlap). "
+                             "Counts towards --max-tile-voxels, and keeps a last tile from being smaller than it.")
 
-    parser.add_argument("--x-min", type=float, default=None)
-    parser.add_argument("--x-max", type=float, default=None)
-    parser.add_argument("--y-min", type=float, default=None)
-    parser.add_argument("--y-max", type=float, default=None)
-    parser.add_argument("--z-min", type=float, default=None)
-    parser.add_argument("--z-max", type=float, default=None)
+    for ax in "xyz":
+        parser.add_argument(f"--{ax}-min", type=float, default=None)
+        parser.add_argument(f"--{ax}-max", type=float, default=None)
 
-    parser.add_argument(
-        "--use-physical-units",
-        action="store_true",
-        help="Interpret tile sizes, overlap, and ROI bounds in physical units.",
-    )
-
+    parser.add_argument("--use-physical-units", action="store_true",
+                        help="Tile sizes, overlap, halo and ROI bounds are in physical units "
+                             "(the NGFF translation is the centre of the first voxel).")
     return parser
 
 
 def main() -> None:
-    args = build_arg_parser().parse_args()
-    construct_tiles(
-        source_dataset_id=args.source_dataset_id,
-        input_image_path=args.input_image_path,
-        output_csv=args.output_csv,
-        tile_size_x=args.tile_size_x,
-        tile_size_y=args.tile_size_y,
-        tile_size_z=args.tile_size_z,
-        tile_overlap=args.tile_overlap,
-        resolution_level=args.resolution_level,
-        x_min=args.x_min,
-        x_max=args.x_max,
-        y_min=args.y_min,
-        y_max=args.y_max,
-        z_min=args.z_min,
-        z_max=args.z_max,
-        use_physical_units=args.use_physical_units,
-        halo=args.halo,
-    )
+    construct_tiles(build_arg_parser().parse_args())
 
 
 if __name__ == "__main__":

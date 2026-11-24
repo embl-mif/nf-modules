@@ -2,7 +2,10 @@ process TILE_CONSTRUCTOR {
     tag "$meta.id"
     label 'process_low'
 
-    container "ghcr.io/embl-mif/zarr_tools:0.34.0"
+    // Needs ZarrSmith's tile planner (zarrsmith.utils.tiling.plan_tiles, branch
+    // consolidated_translation, not released yet). Pin this to the release version once it is out.
+    container 'ghcr.io/embl-mif/zarrsmith:consolidated_translation'
+    conda "${moduleDir}/environment.yml"
 
     input:
     tuple val(meta), path(local_image), val(image_uri)
@@ -13,38 +16,28 @@ process TILE_CONSTRUCTOR {
     script:
     def image = image_uri ?: local_image
     def output_csv = "${meta.id}_tiles.csv"
-    def resolution_level_arg = meta.resolution_level != null ? "--resolution-level ${meta.resolution_level}" : ""
-    def tile_size_x_arg = meta.tile_size_x != null ? "--tile-size-x ${meta.tile_size_x}" : ""
-    def tile_size_y_arg = meta.tile_size_y != null ? "--tile-size-y ${meta.tile_size_y}" : ""
-    def tile_size_z_arg = meta.tile_size_z != null ? "--tile-size-z ${meta.tile_size_z}" : ""
-    def tile_overlap_arg = meta.tile_overlap != null ? "--tile-overlap ${meta.tile_overlap}" : ""
-    def halo_arg = meta.halo != null ? "--halo ${meta.halo}" : ""
-    def x_min_arg = meta.x_min != null ? "--x-min ${meta.x_min}" : ""
-    def x_max_arg = meta.x_max != null ? "--x-max ${meta.x_max}" : ""
-    def y_min_arg = meta.y_min != null ? "--y-min ${meta.y_min}" : ""
-    def y_max_arg = meta.y_max != null ? "--y-max ${meta.y_max}" : ""
-    def z_min_arg = meta.z_min != null ? "--z-min ${meta.z_min}" : ""
-    def z_max_arg = meta.z_max != null ? "--z-max ${meta.z_max}" : ""
-    def use_physical_units_arg = meta.use_physical_units ? "--use-physical-units" : ""
+    def optional = { flag, value -> value != null ? "${flag} ${value}" : "" }
 
     """
     tile_constructor.py \\
         --source-dataset-id "${meta.id}" \\
         --input-image-path \"${image}\" \\
         --output-csv ${output_csv} \\
-        ${tile_size_x_arg} \\
-        ${tile_size_y_arg} \\
-        ${tile_size_z_arg} \\
-        ${tile_overlap_arg} \\
-        ${halo_arg} \\
-        ${resolution_level_arg} \\
-        ${x_min_arg} \\
-        ${x_max_arg} \\
-        ${y_min_arg} \\
-        ${y_max_arg} \\
-        ${z_min_arg} \\
-        ${z_max_arg} \\
-        ${use_physical_units_arg}
+        ${optional('--tile-size-x', meta.tile_size_x)} \\
+        ${optional('--tile-size-y', meta.tile_size_y)} \\
+        ${optional('--tile-size-z', meta.tile_size_z)} \\
+        ${optional('--max-tile-voxels', meta.max_tile_voxels)} \\
+        ${optional('--resize', meta.tile_resize)} \\
+        ${optional('--tile-overlap', meta.tile_overlap)} \\
+        ${optional('--halo', meta.halo)} \\
+        ${optional('--resolution-level', meta.resolution_level)} \\
+        ${optional('--x-min', meta.x_min)} \\
+        ${optional('--x-max', meta.x_max)} \\
+        ${optional('--y-min', meta.y_min)} \\
+        ${optional('--y-max', meta.y_max)} \\
+        ${optional('--z-min', meta.z_min)} \\
+        ${optional('--z-max', meta.z_max)} \\
+        ${meta.use_physical_units ? '--use-physical-units' : ''}
     """
 
     stub:

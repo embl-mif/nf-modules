@@ -28,7 +28,24 @@ workflow TILED_CELLPOSE_SAM_ZARR {
         tuple(meta.id, meta, image, localImage, imageUri)
     }
 
-    TILE_CONSTRUCTOR( ch_split_images.map { id, meta, image, localImage, imageUri -> tuple(meta.subMap(tileConstructorKeys) + [id: meta.id], localImage, imageUri) } )
+    // Tile budget: the most voxels one Cellpose tile may read, halo included. Axes without a
+    // tile_size_<ax> are cut by ZarrSmith's planner to fit it. The default fits the first
+    // attempt of the 'gpu' label in conf/embl_hd.config (about 2.7 GB + 329 bytes per input
+    // voxel, measured at diameter 15, so per input voxel: tile_resize stays 1 by default).
+    // Set it per image (CSV column max_tile_voxels) or for the run (--max_tile_voxels).
+    // tile_resize (e.g. 30 / diameter) multiplies the voxels counted against the budget.
+    def defaultMaxTileVoxels = 300_000_000L
+    def tileConstructorMeta = { meta ->
+        def budget = Utils.normalizeOptionalText(meta.max_tile_voxels) ?: Utils.normalizeOptionalText(params.get('max_tile_voxels'))
+        def resize = Utils.normalizeOptionalText(meta.tile_resize)
+        meta.subMap(tileConstructorKeys) + [
+            id             : meta.id,
+            max_tile_voxels: budget ? new BigDecimal(budget).toBigInteger() : defaultMaxTileVoxels,
+            tile_resize    : resize ? resize as double : null,
+        ]
+    }
+
+    TILE_CONSTRUCTOR( ch_split_images.map { id, meta, image, localImage, imageUri -> tuple(tileConstructorMeta(meta), localImage, imageUri) } )
 
     ch_image_tiles = TILE_CONSTRUCTOR.out.tiles
         .map { parentMeta, tileCsv -> tuple(parentMeta.id, tileCsv) }
