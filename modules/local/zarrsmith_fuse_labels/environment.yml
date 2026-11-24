@@ -7,5 +7,5 @@ dependencies:
   - git
   - pip
   - pip:
-      # store_tiles/RelabeledArray are not released yet; pin a release once they are.
+      # `zarrsmith fuse --label_offsets/--label_mapping` is not released yet; pin a release once it is.
       - "zarrsmith @ git+https://github.com/embl-mif/zarrsmith.git@consolidated_translation"

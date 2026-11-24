@@ -1,8 +1,8 @@
 process ZARRSMITH_FUSE_LABELS {
     tag "${meta.id}"
     label 'process_medium'
-    // Needs ZarrSmith with store_tiles/RelabeledArray (branch consolidated_translation, not
-    // released yet). Pin this to the release version once it is out.
+    // Needs ZarrSmith with `zarrsmith fuse --label_offsets/--label_mapping` (branch
+    // consolidated_translation, not released yet). Pin this to the release version once it is out.
     container 'ghcr.io/embl-mif/zarrsmith:consolidated_translation'
     conda "${moduleDir}/environment.yml"
 
@@ -30,28 +30,41 @@ process ZARRSMITH_FUSE_LABELS {
     // local_image is a NO_*-named sentinel when the image is given by URI (see PREALLOCATE_ZARR)
     def source = image_uri ?: (!local_image.name.startsWith('NO_') ? local_image : null)
 
-    def commandParts = [
-        'fuse_labels.py',
+    // offsets CSV (tile_index * label_offset_step per store) and the source's pyramid (-nl/-df)
+    def prepareParts = [
+        'fuse_labels_inputs.py',
         '--tiles-dir', 'tiles',
         '--tiles-csv', shellQuote(tiles_csv),
-        '--global-mapping', shellQuote(global_mapping),
         '--label-offset-step', meta.label_offset_step,
-        '--output-zarr', shellQuote(output_zarr),
-        '--name', shellQuote(meta.id),
-        '--workers', task.cpus ?: 1,
+        '--offsets-csv', 'label_offsets.csv',
+        '--pyramid-args', 'pyramid_args.txt',
     ]
-    if (source)                        { commandParts.addAll(['--source-image', shellQuote(source)]) }
-    if (meta.resolution_level != null) { commandParts.addAll(['--resolution-level', meta.resolution_level]) }
-    if (meta.num_levels != null)       { commandParts.addAll(['--num-levels', meta.num_levels]) }
-    if (meta.downscale_factor != null) { commandParts.add('--downscale-factor'); commandParts.addAll(meta.downscale_factor.toString().split(/[\s,;]+/).findAll { it }) }
-    if (meta.dtype != null)            { commandParts.addAll(['--dtype', meta.dtype]) }
-    def command = commandParts.join(' ')
+    if (source)                        { prepareParts.addAll(['--source-image', shellQuote(source)]) }
+    if (meta.resolution_level != null) { prepareParts.addAll(['--resolution-level', meta.resolution_level]) }
+    if (meta.num_levels != null)       { prepareParts.addAll(['--num-levels', meta.num_levels]) }
+    if (meta.downscale_factor != null) { prepareParts.add('--downscale-factor'); prepareParts.addAll(meta.downscale_factor.toString().split(/[\s,;]+/).findAll { it }) }
+
+    // -m zarr: a folder of OME-Zarr stores, each placed by its own NGFF translation.
+    // --label_offsets/--label_mapping imply --data_type label and blend none.
+    def fuseParts = [
+        'zarrsmith', 'fuse',
+        '-m', 'zarr',
+        '-i', 'tiles',
+        '-z', shellQuote(output_zarr),
+        '-lo', 'label_offsets.csv',
+        '-lm', shellQuote(global_mapping),
+        '-od', meta.dtype ?: 'uint32',
+        '-rw', task.cpus ?: 1,
+        '-ow',
+    ]
+    if (meta.pyramid_method != null)   { fuseParts.addAll(['-me', meta.pyramid_method]) }
 
     // Keep this script indented with spaces only: Nextflow dedents it, and stray tabs
     // leave the END_VERSIONS heredoc terminator indented, so bash never closes it.
     """
     mkdir -p "\$(dirname ${shellQuote(output_zarr)})"
-    ${command} ${args}
+    ${prepareParts.join(' ')}
+    ${fuseParts.join(' ')} \$(cat pyramid_args.txt) ${args}
 
     if [ ! -e ${shellQuote(output_zarr)}/zarr.json ] && [ ! -e ${shellQuote(output_zarr)}/.zgroup ]; then
         echo "ERROR: expected zarr store not found: ${output_zarr}" >&2
