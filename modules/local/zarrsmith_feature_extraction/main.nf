@@ -25,6 +25,8 @@ process ZARRSMITH_FEATURE_EXTRACTION {
     def channelsArg = meta.features_channels ? "--channels ${shellQuote(meta.features_channels)}" : ""
     def extraPropertiesArg = meta.features_extra_properties ? "--extra-properties ${shellQuote(meta.features_extra_properties)}" : ""
     def extraIntensityPropertiesArg = meta.features_extra_intensity_properties ? "--extra-intensity-properties ${shellQuote(meta.features_extra_intensity_properties)}" : ""
+    // Unset -> the script's default percentiles (25 and 75).
+    def intensityPercentilesArg = meta.features_intensity_percentiles ? "--intensity-percentiles ${shellQuote(meta.features_intensity_percentiles)}" : ""
 
     """
     if [ -e ${shellQuote(output_csv)} ]; then
@@ -41,7 +43,8 @@ process ZARRSMITH_FEATURE_EXTRACTION {
             ${labelsLevelArg} \
             ${channelsArg} \
             ${extraPropertiesArg} \
-            ${extraIntensityPropertiesArg}
+            ${extraIntensityPropertiesArg} \
+            ${intensityPercentilesArg}
     fi
 
     if [ ! -e ${shellQuote(output_csv)} ]; then
