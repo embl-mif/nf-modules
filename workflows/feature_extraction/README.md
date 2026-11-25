@@ -30,7 +30,12 @@ One dataset per row. Required columns:
 | `labels_resolution_level` | Pyramid level to read from `labels`. Defaults to `--labels_resolution_level` (0). The spatial (and time) extent at these two levels must match exactly; a mismatch raises a clear error. |
 | `channels` | Intensity channel indices to measure, separated by `;`, `,` or whitespace. Defaults to every channel. |
 | `extra_properties` | Extra `skimage.measure.regionprops` properties to add to the base structural set (`area`, `bbox`, `centroid`, `perimeter`, `orientation`, `eccentricity`, `solidity`, `extent`, `major_axis_length`, `minor_axis_length`, plus the derived `form_factor` = `4*pi*area/perimeter^2`), measured once per label. Separated by `;`, `,` or whitespace, e.g. `inertia_tensor_eigvals feret_diameter_max`. An unsupported property for the label image's dimensionality raises a clear error. |
-| `extra_intensity_properties` | Extra `regionprops` properties that require an intensity image (e.g. `weighted_centroid`), added to the base per-channel set (`mean_intensity`, `min_intensity`, `max_intensity`) and measured once per channel in `channels`. Same separator rules as `extra_properties`. |
+| `extra_intensity_properties` | Extra `regionprops` properties that require an intensity image (e.g. `weighted_centroid`), added to the base per-channel set (`mean_intensity`, `min_intensity`, `max_intensity`, `std_intensity`, plus the `intensity_percentiles` below) and measured once per channel in `channels`. Same separator rules as `extra_properties`. |
+| `intensity_percentiles` | Percentiles (0–100) of each label's pixel intensities to measure per channel, written as `p<percentile>_intensity` (a decimal point becomes `_`, e.g. `2.5` → `p2_5_intensity`). Same separator rules as `extra_properties`, e.g. `5;25;50;75;95`. Defaults to `25;75`. |
+
+`std_intensity` is the population standard deviation (`ddof=0`) of the
+label's pixel intensities; percentiles use NumPy's default linear
+interpolation.
 
 Every measured column is suffixed per channel as `<property>_ch<index>` (or
 `<property>_ch<index>_<channel name>` when the intensity OME-Zarr has
@@ -41,9 +46,9 @@ depend on the label image.
 ### Example
 
 ```csv
-dataset_id,intensity,labels,channels,extra_properties,extra_intensity_properties
-sample_01,/scratch/user/mip/sample_01_mip.ome.zarr,/scratch/user/labels/sample_01_labels.ome.zarr,0;1,inertia_tensor_eigvals,
-sample_02,/scratch/user/mip/sample_02_mip.ome.zarr,/scratch/user/labels/sample_02_labels.ome.zarr,,,
+dataset_id,intensity,labels,channels,extra_properties,extra_intensity_properties,intensity_percentiles
+sample_01,/scratch/user/mip/sample_01_mip.ome.zarr,/scratch/user/labels/sample_01_labels.ome.zarr,0;1,inertia_tensor_eigvals,,5;25;50;75;95
+sample_02,/scratch/user/mip/sample_02_mip.ome.zarr,/scratch/user/labels/sample_02_labels.ome.zarr,,,,
 ```
 
 ## Parameters

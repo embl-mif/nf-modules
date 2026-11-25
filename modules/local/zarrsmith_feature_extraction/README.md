@@ -1,6 +1,6 @@
 # ZARRSMITH_FEATURE_EXTRACTION
 
-Measures every label of a label OME-Zarr against an intensity OME-Zarr with `skimage.measure.regionprops` (shape properties plus per-channel intensities) and writes one CSV row per label.
+Measures every label of a label OME-Zarr against an intensity OME-Zarr with `skimage.measure.regionprops` (shape properties plus per-channel intensities: mean, min, max, standard deviation and percentiles — 25 and 75 by default, set with `meta.features_intensity_percentiles`) and writes one CSV row per label.
 
 ## Input
 | Name | Type | Description |

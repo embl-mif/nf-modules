@@ -73,6 +73,7 @@ same per-level shapes).
 | `features_channels` | MIP channel indices to measure, separated by `;`, `,` or whitespace. Defaults to every channel. |
 | `features_extra_properties` | Extra `skimage.measure.regionprops` properties to add to the base structural set, separated by `;`, `,` or whitespace. |
 | `features_extra_intensity_properties` | Extra `regionprops` properties that require an intensity image, measured once per channel in `features_channels`. |
+| `features_intensity_percentiles` | Percentiles (0–100) of each label's pixel intensities to measure per channel (as `p<percentile>_intensity`), separated by `;`, `,` or whitespace. Defaults to `25;75`. The standard deviation (`std_intensity`) is always measured. |
 
 Every measured column is suffixed per channel as `<property>_ch<index>` (or
 `<property>_ch<index>_<channel name>` when available), e.g.

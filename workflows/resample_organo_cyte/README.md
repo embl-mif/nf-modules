@@ -85,7 +85,7 @@ Same columns as [organo_cyte](../organo_cyte/README.md#2-tiled-cellpose-sam-segm
 Same columns as [organo_cyte](../organo_cyte/README.md#3-feature-extraction):
 `features_output` (default `<outdir>/measurements/<dataset_id>_features.csv`),
 `intensity_resolution_level`, `labels_resolution_level`, `channels`,
-`extra_properties`, `extra_intensity_properties`.
+`extra_properties`, `extra_intensity_properties`, `intensity_percentiles`.
 
 ### Example
 

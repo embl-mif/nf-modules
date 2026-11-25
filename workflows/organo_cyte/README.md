@@ -148,6 +148,7 @@ label OME-Zarr; neither needs to be given. All columns are optional.
 | `channels` | every channel | Intensity channel indices to measure (`;`, `,` or space-separated). |
 | `extra_properties` | none | Extra `regionprops` properties, e.g. `inertia_tensor_eigvals feret_diameter_max`. |
 | `extra_intensity_properties` | none | Extra `regionprops` properties that need an intensity image, e.g. `weighted_centroid`. |
+| `intensity_percentiles` | `25;75` | Percentiles (0–100) of each label's pixel intensities, per channel, e.g. `5;25;50;75;95`. The standard deviation is always measured. |
 
 See [feature_extraction](../feature_extraction/README.md) for the full list of
 measured properties and the output column naming.
