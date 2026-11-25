@@ -34,6 +34,21 @@ BASE_STRUCTURAL_PROPERTIES_ND = (
 
 BASE_INTENSITY_PROPERTIES = ("label", "mean_intensity", "min_intensity", "max_intensity")
 
+# Per-channel statistics always measured, keyed by every name (old and new
+# skimage spelling) a user might also pass in --extra-intensity-properties,
+# mapped to the column that already holds it. Requesting one of these again
+# would duplicate a column, so it is skipped.
+ALREADY_MEASURED_INTENSITY_PROPERTIES = {
+    "mean_intensity": "mean_intensity",
+    "intensity_mean": "mean_intensity",
+    "min_intensity": "min_intensity",
+    "intensity_min": "min_intensity",
+    "max_intensity": "max_intensity",
+    "intensity_max": "max_intensity",
+    "std_intensity": "std_intensity",
+    "intensity_std": "std_intensity",
+}
+
 # Percentiles of each label's pixel intensities measured per channel when
 # --intensity-percentiles is not given.
 DEFAULT_INTENSITY_PERCENTILES = "25,75"
@@ -136,6 +151,17 @@ def parse_percentile_list(text: str | None) -> list[float]:
         if not 0 <= value <= 100:
             raise ValueError(f"Percentile {value:g} is out of range; expected a value between 0 and 100")
     return sorted(set(values))
+
+
+def drop_already_measured(extra_intensity_properties: list[str]) -> list[str]:
+    kept = []
+    for prop in extra_intensity_properties:
+        existing = ALREADY_MEASURED_INTENSITY_PROPERTIES.get(prop)
+        if existing:
+            print(f"Skipping extra intensity property '{prop}': already measured as {existing}")
+        elif prop not in kept:
+            kept.append(prop)
+    return kept
 
 
 def percentile_column_name(percentile: float) -> str:
@@ -262,7 +288,7 @@ def main():
 
     channel_indices = parse_int_list(args.channels)
     extra_properties = parse_token_list(args.extra_properties)
-    extra_intensity_properties = parse_token_list(args.extra_intensity_properties)
+    extra_intensity_properties = drop_already_measured(parse_token_list(args.extra_intensity_properties))
     percentiles = parse_percentile_list(args.intensity_percentiles)
 
     intensity_source = mm.ZarrManager(str(args.intensity))
