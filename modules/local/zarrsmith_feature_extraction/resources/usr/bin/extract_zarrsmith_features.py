@@ -5,6 +5,10 @@ Load an intensity OME-Zarr and a label OME-Zarr with ZarrSmith, measure every
 label with skimage.measure.regionprops (a base property set, plus any
 user-requested structural and/or per-channel intensity properties), and
 write the resulting feature table as a single CSV.
+
+Per channel, the base intensity set is mean/min/max, the standard deviation
+("std_intensity") and the requested percentiles ("p25_intensity",
+"p75_intensity" by default) of each label's pixel intensities.
 """
 
 import argparse
@@ -29,6 +33,20 @@ BASE_STRUCTURAL_PROPERTIES_ND = (
 )
 
 BASE_INTENSITY_PROPERTIES = ("label", "mean_intensity", "min_intensity", "max_intensity")
+
+# Percentiles of each label's pixel intensities measured per channel when
+# --intensity-percentiles is not given.
+DEFAULT_INTENSITY_PERCENTILES = "25,75"
+
+
+def pixel_std_intensity(regionmask: np.ndarray, intensity_image: np.ndarray) -> float:
+    """Population standard deviation (ddof=0) of the label's pixel intensities.
+
+    Named so it cannot collide with a skimage property: skimage >= 0.26 has a
+    deprecated "std_intensity" alias that would shadow a custom function of
+    that name. The column is renamed to "std_intensity" in measure_intensity.
+    """
+    return float(np.std(intensity_image[regionmask]))
 
 
 def parse_args():
@@ -73,6 +91,17 @@ def parse_args():
             "measured once per requested channel (e.g. 'weighted_centroid')."
         ),
     )
+    parser.add_argument(
+        "--intensity-percentiles",
+        type=str,
+        default=DEFAULT_INTENSITY_PERCENTILES,
+        help=(
+            "Comma/semicolon/whitespace-separated percentiles (0-100) of each "
+            "label's pixel intensities to measure per channel, written as "
+            "'p<percentile>_intensity_<channel>' (e.g. '5,25,50,75,95'). "
+            f"Defaults to '{DEFAULT_INTENSITY_PERCENTILES}'."
+        ),
+    )
     parser.add_argument("--dataset-id", type=str, default=None)
     return parser.parse_args()
 
@@ -92,6 +121,28 @@ def parse_int_list(text: str | None) -> list[int]:
             f"Invalid channel list '{text}'. Expected integer channel "
             "indices separated by comma, semicolon, or whitespace."
         ) from exc
+
+
+def parse_percentile_list(text: str | None) -> list[float]:
+    tokens = parse_token_list(text)
+    try:
+        values = [float(token) for token in tokens]
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid percentile list '{text}'. Expected numbers between 0 "
+            "and 100 separated by comma, semicolon, or whitespace."
+        ) from exc
+    for value in values:
+        if not 0 <= value <= 100:
+            raise ValueError(f"Percentile {value:g} is out of range; expected a value between 0 and 100")
+    return sorted(set(values))
+
+
+def percentile_column_name(percentile: float) -> str:
+    # 25 -> "p25_intensity", 2.5 -> "p2_5_intensity" (no "." so the name stays
+    # usable in zarrsmith_filter's "property:min:max" expressions).
+    text = np.format_float_positional(percentile, trim="-")
+    return f"p{text.replace('.', '_')}_intensity"
 
 
 def sanitize_suffix(text: str) -> str:
@@ -133,10 +184,40 @@ def measure_intensity(
     intensity_image: np.ndarray,
     suffix: str,
     extra_intensity_properties: list[str],
+    percentiles: list[float],
 ) -> pd.DataFrame:
     properties = BASE_INTENSITY_PROPERTIES + tuple(extra_intensity_properties)
-    table = regionprops_table(label_image, intensity_image=intensity_image, properties=properties)
+    extra_functions = [pixel_std_intensity]
+
+    if percentiles:
+        q = np.asarray(percentiles, dtype=float)
+
+        def intensity_percentiles(regionmask, intensity_image):
+            # One call per label computes every requested percentile at once.
+            return np.percentile(intensity_image[regionmask], q)
+
+        extra_functions.append(intensity_percentiles)
+
+    table = regionprops_table(
+        label_image,
+        intensity_image=intensity_image,
+        properties=properties,
+        extra_properties=extra_functions,
+    )
     df = pd.DataFrame(table)
+
+    # regionprops_table expands an array-valued property into
+    # "intensity_percentiles-0", "intensity_percentiles-1", ...
+    df = df.rename(
+        columns={
+            "pixel_std_intensity": "std_intensity",
+            **{
+                f"intensity_percentiles-{i}": percentile_column_name(percentile)
+                for i, percentile in enumerate(percentiles)
+            },
+        }
+    )
+
     return df.rename(columns={col: f"{col}_{suffix}" for col in df.columns if col != "label"})
 
 
@@ -182,6 +263,7 @@ def main():
     channel_indices = parse_int_list(args.channels)
     extra_properties = parse_token_list(args.extra_properties)
     extra_intensity_properties = parse_token_list(args.extra_intensity_properties)
+    percentiles = parse_percentile_list(args.intensity_percentiles)
 
     intensity_source = mm.ZarrManager(str(args.intensity))
     intensity_axes = intensity_source.metadata["axes"].lower()
@@ -283,7 +365,7 @@ def main():
                 )
             )
             intensity_df = measure_intensity(
-                label_image, channel_image, channel_suffixes[channel_idx], extra_intensity_properties
+                label_image, channel_image, channel_suffixes[channel_idx], extra_intensity_properties, percentiles
             )
             df = df.merge(intensity_df, on="label")
 
