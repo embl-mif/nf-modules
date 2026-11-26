@@ -9,6 +9,8 @@ Builds one tile's contribution to the region-adjacency graph used for multicut s
 | `self_zarr` | path | This tile's label zarr |
 | `right_zarr`, `bottom_zarr`, `behind_zarr` | path | Neighbour label zarrs (placeholders when the neighbour does not exist) |
 
+Each label zarr is read at level 0, the first dataset of its NGFF `multiscales` (NGFF 0.4 or 0.5): stores written by ngff-zarr (`scale0/nuclei_labels`) and by ZarrSmith (`0`) both work, and a store without that metadata is read at `scale0/nuclei_labels`. Non-spatial axes (`t`, `c`) are dropped by name and must have size 1. Only the overlap band of each neighbour is read.
+
 ## Output
 | Name | Type | Description |
 | --- | --- | --- |

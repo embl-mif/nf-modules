@@ -33,7 +33,10 @@ from typing import Any
 
 import numpy as np
 
-LABEL_ARRAY_PATH = "scale0/nuclei_labels"
+# Level-0 array of a tile label store written by ngff-zarr (CELLPOSE_SAM_ZARR_MIF so far);
+# only used when the store's NGFF metadata does not name its level-0 dataset.
+LEGACY_LABEL_ARRAY_PATH = "scale0/nuclei_labels"
+SPATIAL_AXES = ("z", "y", "x")
 
 _DIRECTION_AXIS_3D = {"behind": 0, "bottom": 1, "right": 2}
 _DIRECTION_AXIS_2D = {"bottom": 0, "right": 1}
@@ -384,17 +387,65 @@ def _offset_labels(seg: np.ndarray, offset: int, background: int = 0) -> np.ndar
     return offset_seg
 
 
+def _multiscales(attrs: dict) -> dict | None:
+    """First multiscales entry: under "ome" for NGFF 0.5/0.6, on the group for 0.4."""
+    entries = (attrs.get("ome") or {}).get("multiscales") or attrs.get("multiscales") or []
+    return entries[0] if entries else None
+
+
+def _axis_names(multiscales: dict | None, ndim: int) -> list[str] | None:
+    """Axis names of level 0 (NGFF 0.4/0.5 ``axes``), or None when not recorded."""
+    axes = (multiscales or {}).get("axes")
+    if not axes:
+        return None
+    names = [a["name"] if isinstance(a, dict) else str(a) for a in axes]
+    return names if len(names) == ndim else None
+
+
+class _SpatialView:
+    """Lazy view of a label array with its non-spatial axes (t, c) fixed at index 0, so
+    indexing it reads only the requested part of the store, e.g. a neighbour's halo band."""
+
+    def __init__(self, array, fixed: dict[int, int]):
+        self._array = array
+        self._fixed = fixed
+        self.shape = tuple(n for i, n in enumerate(array.shape) if i not in fixed)
+        self.ndim = len(self.shape)
+
+    def __getitem__(self, key):
+        key = key if isinstance(key, tuple) else (key,)
+        key = list(key) + [slice(None)] * (self.ndim - len(key))
+        full, spatial = [], iter(key)
+        for i in range(self._array.ndim):
+            full.append(self._fixed[i] if i in self._fixed else next(spatial))
+        return self._array[tuple(full)]
+
+
 def _open_label_array(path: str):
+    """Level 0 of a tile label store, reduced to its spatial axes (zyx or yx).
+
+    The level-0 array is the first dataset of the store's NGFF ``multiscales``, so stores
+    from ngff-zarr (``scale0/nuclei_labels``) and from ZarrSmith (``0``) both work; a
+    store without that metadata falls back to the ngff-zarr path. Non-spatial axes (t, c)
+    must have size 1: the pipeline stitches one timepoint and one channel per tile.
+    """
     import zarr
-    array = zarr.open(path, mode="r")[LABEL_ARRAY_PATH]
-    if array.ndim > 3 and array.shape[0] == 1:
-        # Singleton leading axis from an OME-Zarr `t` (or stray) dimension the
-        # tiled-stitching pipeline doesn't model -- drop it here so every
-        # downstream ndim==2/3 check sees the real spatial rank. A genuine
-        # multi-frame axis (shape[0] > 1) is left untouched and will still
-        # correctly raise, since this pipeline has no per-timepoint stitching.
-        array = array[0]
-    return array
+
+    group = zarr.open_group(path, mode="r")
+    multiscales = _multiscales(group.attrs.asdict())
+    datasets = (multiscales or {}).get("datasets") or []
+    array = group[datasets[0]["path"]] if datasets else group[LEGACY_LABEL_ARRAY_PATH]
+
+    names = _axis_names(multiscales, array.ndim)
+    if names is not None:
+        extra = [i for i, name in enumerate(names) if name not in SPATIAL_AXES]
+    else:
+        # No axis names (e.g. NGFF 0.6 coordinate systems): leading axes beyond zyx.
+        extra = list(range(max(0, array.ndim - 3)))
+    big = {names[i] if names else i: array.shape[i] for i in extra if array.shape[i] != 1}
+    if big:
+        raise ValueError(f"{path}: non-spatial axes must have size 1 to be stitched, got {big}.")
+    return _SpatialView(array, {i: 0 for i in extra})
 
 
 def _load_full(path: str) -> np.ndarray:
