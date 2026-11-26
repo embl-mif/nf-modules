@@ -264,12 +264,17 @@ def solve_global_multicut(
     Returns
     -------
     label_mapping : dict[int, int]
-        Global node ID -> global label, for every node ID that appears in at
-        least one edge. A node that never touches another label (no in-tile
+        Global node ID -> the smallest global node ID of its stitched object,
+        for every node ID that appears in at least one edge. Objects are the
+        connected components of the edges the multicut keeps (does not cut);
+        the multicut's own node labels are not used as objects, because nodes
+        with no path between them can share a label (nothing separates them).
+        Using a node ID as the object's ID keeps every ID unique without a
+        new numbering. A node that never touches another label (no in-tile
         neighbor, no boundary overlap) has no entry here -- callers must fall
         back to the node's own ID unchanged (it's already globally unique via
         the offset scheme and needs no merging), not treat a missing key as
-        an error. See Module 6's `relabel_segmentation`.
+        an error.
     """
     import nifty.graph as ng
     import nifty.graph.opt.multicut as nmc
@@ -314,17 +319,25 @@ def solve_global_multicut(
     solver = objective.kernighanLinFactory().create(objective)
     node_labels = solver.optimize()
 
-    # Compress component ids to consecutive labels
-    unique_components = np.unique(node_labels)
-    component_to_label = {component: i + 1 for i, component in enumerate(unique_components)}
+    # Objects: connected components of the edges joining nodes of the same multicut label
+    # (a union-find over the kept edges). Each object takes its smallest node ID.
+    node_labels = np.asarray(node_labels)
+    kept = dense_edges[node_labels[dense_edges[:, 0]] == node_labels[dense_edges[:, 1]]]
+    parent = np.arange(len(graph_labels))
 
-    # Final mapping: global node ID -> stitched global label
-    label_mapping = {
-        int(label): component_to_label[component]
-        for label, component in zip(graph_labels, node_labels)
-    }
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
 
-    return label_mapping
+    for u, v in kept:
+        ru, rv = find(int(u)), find(int(v))
+        if ru != rv:
+            parent[max(ru, rv)] = min(ru, rv)  # the root stays the smallest index of its object
+
+    # graph_labels is sorted, so the smallest index of an object is its smallest node ID
+    return {int(label): int(graph_labels[find(i)]) for i, label in enumerate(graph_labels)}
 
 
 def relabel_segmentation(

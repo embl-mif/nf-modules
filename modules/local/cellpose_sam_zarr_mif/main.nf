@@ -63,7 +63,8 @@ process CELLPOSE_SAM_ZARR_MIF {
     maxRetries 2
     
     // Set up environment
-    container "ghcr.io/embl-mif/cellpose_zarr:4.1.1"
+    // Cellpose-SAM 4.1.1 with ZarrSmith (containers/cellpose_zarr, VERSION 4.1.1-zs1)
+    container "ghcr.io/embl-mif/cellpose_zarr:4.1.1-zs1"
 
     input:
     tuple val(meta), path(local_image), val(image_uri)
@@ -103,6 +104,9 @@ process CELLPOSE_SAM_ZARR_MIF {
     def flow_threshold_arg = Utils.optionalCliArg("--flow_threshold", meta.flow_threshold)
     def cellprob_threshold_arg = Utils.optionalCliArg("--cellprob_threshold", meta.cellprob_threshold)
     def do_3D_arg = "--do_3D ${meta.do_3D}"
+    // Tiles are only read at level 0 (LOCAL_LABEL_MATCHER, ZARRSMITH_FUSE_LABELS): no pyramid.
+    // Untiled outputs keep a pyramid that follows the source image.
+    def num_levels_arg = meta.is_tiled ? "--num-levels 1" : ""
     def args = task.ext.args ?: ''
 
     """
@@ -125,6 +129,7 @@ process CELLPOSE_SAM_ZARR_MIF {
         ${flow_threshold_arg} \
         ${cellprob_threshold_arg} \
         ${do_3D_arg} \
+        ${num_levels_arg} \
         ${args}
 
     ${Utils.shellLinkOutput(output_zarr)}

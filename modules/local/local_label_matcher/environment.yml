@@ -1,0 +1,14 @@
+# Same packages and versions as the ghcr.io/embl-mif/multicut_stitching:0.8.0 image
+# (containers/multicut_stitching/Dockerfile), used by LOCAL_LABEL_MATCHER and LABEL_SOLVER.
+# Keep the two in step. For local testing:
+#   mamba env create -f modules/local/local_label_matcher/environment.yml
+name: multicut_stitching
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - numpy=2.4.4
+  - zarr=3.1.6
+  - nifty=1.2.4          # conda-forge only (the PyPI "nifty" is an unrelated package)
+  - bioimage-cpp=0.8.0
