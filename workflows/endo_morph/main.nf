@@ -58,6 +58,7 @@ workflow {
                 endomorph_regions_output : resolveIntermediate(row, 'endomorph_regions_output', dataset_id),
                 endomorph_cells_output   : resolveIntermediate(row, 'endomorph_cells_output', dataset_id),
                 endomorph_summary_output : resolveIntermediate(row, 'endomorph_summary_output', dataset_id),
+                endomorph_gaps_output    : resolveIntermediate(row, 'endomorph_gaps_output', dataset_id),
 
                 seed_segmentation_channels: Utils.normalizeOptionalText(row.seed_channels),
                 seed_halo                 : seed_halo != null ? seed_halo : 20.0,
@@ -179,11 +180,13 @@ workflow {
 
     def regionsMeta = { m ->
         def border_margin = Utils.parseOptionalInt(m.endomorph_border_margin, 'endomorph_border_margin')
+        def empty_border_margin = Utils.parseOptionalInt(m.endomorph_empty_border_margin, 'endomorph_empty_border_margin')
         [
             id                                  : m.id,
             zarr_output                         : m.endomorph_regions_output,
             endomorph_ring_depths               : endomorphRingDepths(m),
             endomorph_border_margin             : border_margin != null ? border_margin : 10,
+            endomorph_empty_border_margin       : empty_border_margin != null ? empty_border_margin : 0,
             endomorph_timepoint                 : endomorphTimepoint(m),
             endomorph_intensity_resolution_level: endomorphIntensityLevel(m),
             endomorph_labels_resolution_level   : 0,
@@ -207,6 +210,7 @@ workflow {
             id                                  : m.id,
             csv_output                          : m.endomorph_cells_output,
             summary_csv_output                  : m.endomorph_summary_output,
+            gaps_csv_output                     : m.endomorph_gaps_output,
             endomorph_ring_depths               : endomorphRingDepths(m),
             endomorph_timepoint                 : endomorphTimepoint(m),
             endomorph_intensity_resolution_level: endomorphIntensityLevel(m),
@@ -289,8 +293,9 @@ workflow {
     }
 
     ZARRSMITH_ENDOMORPH_MERGE(
-        ZARRSMITH_ENDOMORPH_FEATURES.out.csv.map { meta, cells, summary -> cells }.collect(),
-        ZARRSMITH_ENDOMORPH_FEATURES.out.csv.map { meta, cells, summary -> summary }.collect(),
+        ZARRSMITH_ENDOMORPH_FEATURES.out.csv.map { meta, cells, summary, gaps -> cells }.collect(),
+        ZARRSMITH_ENDOMORPH_FEATURES.out.csv.map { meta, cells, summary, gaps -> summary }.collect(),
+        ZARRSMITH_ENDOMORPH_FEATURES.out.csv.map { meta, cells, summary, gaps -> gaps }.collect(),
         merged_dir
     )
 }

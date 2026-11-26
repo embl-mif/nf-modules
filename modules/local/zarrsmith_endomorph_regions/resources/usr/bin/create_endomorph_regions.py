@@ -13,12 +13,17 @@ With N ring depths (any N >= 1):
            (--empty-nucleus-channel of --empty-nucleus-zarr, e.g.
            HOECHST_33342_clean of the clean-channel zarr). Decided by the
            fluorescence alone, never by the labels, since Cellpose can both miss
-           cells and over-reach into cell-free pixels
+           cells and over-reach into cell-free pixels. Only gaps that do not
+           touch the image border (within --empty-border-margin pixels of the
+           image edge or of the not-imaged area) are analysed
   N+2      not imaged: zero in every channel (e.g. padding)
+  N+3      empty but touching the image border: cut by the field of view, so
+           excluded from the gap measurements (still cell-free, so still kept
+           out of the bands)
   0        everything else, including cells excluded for touching the border (a
            cell with no painted band pixel was excluded)
 
-Empty and not-imaged pixels overwrite the bands. All measurements (per-cell
+Empty (N+1, N+3) and not-imaged pixels overwrite the bands. All measurements (per-cell
 features and the per-image summary, including the empty area) are computed
 downstream, from this zarr, by extract_endomorph_features.py. A JSON with QC
 diagnostics of the empty-area estimation (channel levels, threshold, ...) is
@@ -57,8 +62,8 @@ def parse_args():
         description=(
             "Compute nested R1..RN edge-distance bands for every "
             "non-border-touching cell of a label OME-Zarr, plus the empty "
-            "(N+1) and not-imaged (N+2) areas of the intensity image, and "
-            "write them as one label OME-Zarr."
+            "(N+1), not-imaged (N+2) and border-touching empty (N+3) areas of "
+            "the intensity image, and write them as one label OME-Zarr."
         )
     )
     parser.add_argument("--labels", required=True, type=Path)
@@ -130,6 +135,10 @@ def parse_args():
                          "(0 = background, 1 = cell level); the gap extends to --empty-edge-threshold.")
     em.add_argument("--empty-edge-threshold", type=float, default=0.65, metavar="0-1",
                     help="The gap extends to where the normalized cell signal reaches this value.")
+    em.add_argument("--empty-border-margin", type=int, default=0, metavar="PX",
+                    help="Empty regions with any pixel within this many pixels of the image border "
+                         "(or of the not-imaged area) are cut by the field of view: they are written "
+                         "as N+3 and excluded from the gap measurements. 0 = touching only.")
     em.add_argument("--empty-max-floor-ratio", type=float, default=0.55, metavar="RATIO",
                     help="No gap is reported unless the gap floor is below this fraction of the darkest "
                          "cell pixels (guards against inventing gaps in a confluent field).")
@@ -148,7 +157,7 @@ def parse_ring_depths(text: str) -> tuple[float, ...]:
         raise ValueError("--ring-depths needs at least one value")
     if any(d <= 0 for d in depths) or any(a >= b for a, b in zip(depths, depths[1:])):
         raise ValueError(f"--ring-depths must be positive and strictly increasing, got {text!r}")
-    if len(depths) + 2 > 255:
+    if len(depths) + 3 > 255:
         raise ValueError("--ring-depths: too many bands for an 8-bit label image")
     return depths
 
@@ -475,6 +484,31 @@ def estimate_empty_area(
     return result
 
 
+def split_border_gaps(empty: np.ndarray, imaged: np.ndarray, margin: int) -> tuple[np.ndarray, np.ndarray]:
+    """Split `empty` into (kept, border): border = the connected gaps with any pixel within
+    `margin` pixels of the image edge or of the not-imaged area, i.e. cut by the field of view.
+
+    Same rule as for cells: margin 0 means touching the first/last pixel (or a not-imaged pixel).
+    """
+    regions, n = ndi.label(empty)
+    if n == 0:
+        return empty, np.zeros_like(empty)
+    reach = margin + 1
+    near = np.zeros(empty.shape, bool)
+    near[:reach, :] = True
+    near[-reach:, :] = True
+    near[:, :reach] = True
+    near[:, -reach:] = True
+    if not imaged.all():
+        # Distance to the nearest not-imaged pixel; a pixel next to one has distance 1.
+        near |= ndi.distance_transform_edt(imaged) <= reach
+    border = np.zeros(n + 1, bool)
+    border[np.unique(regions[near & empty])] = True
+    border[0] = False
+    is_border = border[regions]
+    return empty & ~is_border, is_border
+
+
 def empty_area_qc(empty: EmptyArea, channel_names: list[str]) -> dict:
     """QC diagnostics of the estimation (what the empty area is not enough to tell)."""
     imaged = int(empty.imaged.sum())
@@ -573,8 +607,13 @@ def main():
         core_min_px=args.empty_core_min_area / (py * px), max_floor_ratio=args.empty_max_floor_ratio,
         imaged_min_px=NOT_IMAGED_MIN_AREA_UM2 / (py * px),
     )
+    # Gaps cut by the field of view are excluded from the measurements (written as N+3).
+    empty.empty, border_empty = split_border_gaps(empty.empty, empty.imaged, args.empty_border_margin)
+    n_border_gaps = int(ndi.label(border_empty)[1])
+
     qc = {
         **empty_area_qc(empty, channel_names),
+        "empty_n_gaps_border_excluded": n_border_gaps,
         "empty_channels": [channel_names[c] for c in empty_channels],
         "empty_nucleus_channel": nucleus_name,
         "empty_nucleus_factor": args.empty_nucleus_factor,
@@ -587,10 +626,12 @@ def main():
         "empty_core_threshold": args.empty_core_threshold,
         "empty_edge_threshold": args.empty_edge_threshold,
         "empty_max_floor_ratio": args.empty_max_floor_ratio,
+        "empty_border_margin": args.empty_border_margin,
     }
     args.output_empty_qc.write_text(json.dumps(qc, indent=2))
 
     region_image[empty.empty] = n_regions + 1
+    region_image[border_empty] = n_regions + 3
     region_image[~empty.imaged] = n_regions + 2
 
     out_unit = NGFF_UNITS.get(unit, unit) or "micrometer"
@@ -613,7 +654,12 @@ def main():
         f"touching the border within {args.border_margin}px)"
     )
     print(f"Bands (px from edge): { {f'R{i}': d for i, d in enumerate(depths, start=1)} }")
-    print(f"Labels: 1..{n_regions}=bands, {n_regions + 1}=empty, {n_regions + 2}=not imaged")
+    print(
+        f"{qc['empty_n_gaps']} gap(s) analysed (excluded {n_border_gaps} touching the border "
+        f"within {args.empty_border_margin}px)"
+    )
+    print(f"Labels: 1..{n_regions}=bands, {n_regions + 1}=empty, {n_regions + 2}=not imaged, "
+          f"{n_regions + 3}=empty touching the border")
     print(f"Wrote region bands + empty area to {args.output}")
 
 

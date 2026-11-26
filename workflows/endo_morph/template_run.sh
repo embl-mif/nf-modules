@@ -26,7 +26,7 @@ export CSV_PATH="/PATH/TO/batch.csv" # <----------------- MODIFY
 # (cell-body markers) and endomorph_empty_nucleus_channel=HOECHST_33342_clean (see README.md).
 export MDL="/g/mif-hd/shared/cellpose_models/cpsam" # <--- MODIFY IF USING A DIFFERENT MODEL
 
-# The merged cells/summary CSVs are saved next to the input csv.
+# The merged cells/gaps/summary CSVs are saved next to the input csv.
 export OUT_DIR="$(dirname "$CSV_PATH")/merged" # <--- MODIFY IF DESIRED
 
 nextflow run "$NF_PATH" \

@@ -1,6 +1,6 @@
 # ZARRSMITH_ENDOMORPH_FEATURES
 
-Measures per-cell morphology (area, perimeter, aspect ratio, orientation) and the mean intensity of every measured channel in each band R1..RN and over the whole cell, and writes the per-image summary (cell counts and empty-area statistics, read from the regions zarr). Makes no assumption about what the channels stain. Skipped if both CSVs already exist.
+Measures per-cell morphology (area, perimeter, aspect ratio, orientation) and the mean intensity of every measured channel in each band R1..RN and over the whole cell, the centroid and area of every gap not touching the image border (label `N+1` of the regions zarr; `N+3` gaps are excluded), and writes the per-image summary (cell and gap counts and empty-area statistics, read from the regions zarr). Makes no assumption about what the channels stain. Skipped if all three CSVs already exist.
 
 ## Input
 | Name | Type | Description |
@@ -13,5 +13,5 @@ Measures per-cell morphology (area, perimeter, aspect ratio, orientation) and th
 ## Output
 | Name | Type | Description |
 | --- | --- | --- |
-| `csv` | `tuple(meta, cells_csv, summary_csv)` | Per-cell CSV and per-image summary CSV |
+| `csv` | `tuple(meta, cells_csv, summary_csv, gaps_csv)` | Per-cell CSV, per-image summary CSV and per-gap CSV (`meta.gaps_csv_output`, default `<id>_endomorph_gaps.csv`) |
 | `versions` | path | `versions.yml` |

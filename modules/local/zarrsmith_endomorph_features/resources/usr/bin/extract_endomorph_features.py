@@ -7,13 +7,17 @@ image, including its empty area.
 
 With N ring depths (--ring-depths, only the count is used here), the regions
 zarr holds bands 1..N (R1..RN, nested: RK = pixels with value 1..K), N+1 =
-empty and N+2 = not imaged. A cell is measured if create_endomorph_regions.py
-painted any band pixel for it; a cell with no painted band pixel was excluded
-there for touching the image border.
+empty, N+2 = not imaged and N+3 = empty but touching the image border. A cell
+is measured if create_endomorph_regions.py painted any band pixel for it; a
+cell with no painted band pixel was excluded there for touching the image
+border. Likewise only the gaps of N+1 are measured: those of N+3 are cut by the
+field of view.
 
 Writes one CSV of per-cell measurements (morphology + the mean of every
---measure-channels channel in each of R1..RN and in the whole cell) and one
-CSV of per-image summary metrics (cell counts and empty-area statistics).
+--measure-channels channel in each of R1..RN and in the whole cell), one CSV
+of per-gap measurements (centroid and area of every connected empty region not
+touching the border) and one CSV of per-image summary metrics (cell and gap
+counts, and empty-area statistics).
 
 Stripped down from endo_morph's features.py/run_endo_morph.py
 (Z:\\people\\gritti\\projects\\Candelas_Adrian\\endo_morph).
@@ -27,6 +31,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import zarrsmith.microscope_manager as mm
+from scipy import ndimage as ndi
 from skimage.measure import regionprops
 
 
@@ -34,8 +39,9 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description=(
             "Measure per-cell morphology and band intensities against the "
-            "R1..RN bands of --regions, and summarize the image (cell counts "
-            "and empty area); write both as CSVs."
+            "R1..RN bands of --regions, measure the gaps (empty regions not "
+            "touching the border), and summarize the image (cell and gap counts "
+            "and empty area); write all three as CSVs."
         )
     )
     parser.add_argument("--intensity", required=True, type=Path)
@@ -43,9 +49,12 @@ def parse_args():
     parser.add_argument("--regions", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--output-summary", required=True, type=Path)
+    parser.add_argument("--output-gaps", required=True, type=Path,
+                        help="CSV with one row per gap (empty region not touching the border).")
     parser.add_argument("--ring-depths", type=str, default="6 9 24",
                         help="The ring depths --regions was made with; only their number N "
-                             "is used (bands 1..N, N+1 = empty, N+2 = not imaged).")
+                             "is used (bands 1..N, N+1 = empty, N+2 = not imaged, "
+                             "N+3 = empty touching the border).")
     parser.add_argument("--measure-channels", type=str, default=None,
                         help="Intensity channels (index or exact name, separated by "
                              "comma/semicolon/whitespace) to average in every region. "
@@ -232,28 +241,58 @@ def measure_cells(
     return pd.DataFrame(rows, columns=cells_columns(n_regions, channel_labels))
 
 
+GAPS_COLUMNS = ["gap_id", "centroid_y_px", "centroid_x_px", "area_px", "area"]
+
+
+def measure_gaps(regions: np.ndarray, n_regions: int, pixel_size_yx: tuple[float, float]) -> pd.DataFrame:
+    """One row per gap: connected region of label N+1 of `regions` (the gaps touching the image
+    border are N+3 and are not measured). Same connectivity as create_endomorph_regions.py."""
+    pixel_area = pixel_size_yx[0] * pixel_size_yx[1]
+    gaps, _ = ndi.label(regions == n_regions + 1)
+    rows = [
+        {
+            "gap_id": prop.label,
+            "centroid_y_px": prop.centroid[0],
+            "centroid_x_px": prop.centroid[1],
+            "area_px": int(prop.area),
+            "area": prop.area * pixel_area,
+        }
+        for prop in regionprops(gaps)
+    ]
+    return pd.DataFrame(rows, columns=GAPS_COLUMNS)
+
+
 def summarize_image(labels: np.ndarray, regions: np.ndarray, n_regions: int, n_cells_analysed: int,
-                    pixel_size_yx: tuple[float, float]) -> dict:
-    """Cell counts and areas. Empty = label N+1 and not imaged = label N+2 of `regions`;
-    percentages are of the imaged area."""
+                    n_gaps_analysed: int, pixel_size_yx: tuple[float, float]) -> dict:
+    """Cell and gap counts and areas. Empty = label N+1, not imaged = N+2 and empty touching the
+    border = N+3 of `regions`; percentages are of the imaged area. `empty_*` counts only the gaps
+    not touching the border; the border gaps are still cell-free, so they never count as
+    undetected cells."""
     pixel_area = pixel_size_yx[0] * pixel_size_yx[1]
     empty = regions == n_regions + 1
+    border_empty = regions == n_regions + 3
     imaged = regions != n_regions + 2
     labelled = labels > 0
     n_imaged = int(imaged.sum())
     n_empty = int(empty.sum())
+    n_border_empty = int(border_empty.sum())
     unlabelled = int((~labelled & imaged).sum())
     empty_in_cells = int((empty & labelled).sum())
+    any_empty_unlabelled = int(((empty | border_empty) & ~labelled).sum())
     pct = (lambda n: 100.0 * n / n_imaged) if n_imaged else (lambda n: np.nan)
     return {
         "n_cells": len(np.unique(labels[labelled])),
         "n_cells_analysed": n_cells_analysed,
+        "n_gaps": n_gaps_analysed + int(ndi.label(border_empty)[1]),
+        "n_gaps_analysed": n_gaps_analysed,
         "image_area": labels.size * pixel_area,
         "imaged_area": n_imaged * pixel_area,
         "empty_area": n_empty * pixel_area,
         "empty_area_pct": pct(n_empty),
+        "empty_border_area": n_border_empty * pixel_area,
+        "empty_border_area_pct": pct(n_border_empty),
         "unlabelled_area_pct": pct(unlabelled),
-        "undetected_cell_area_pct": pct(unlabelled - (n_empty - empty_in_cells)),
+        "undetected_cell_area_pct": pct(unlabelled - any_empty_unlabelled),
         "empty_in_cells_area_pct": pct(empty_in_cells),
     }
 
@@ -310,10 +349,10 @@ def main():
     if regions.shape != image.shape[1:]:
         print(f"Adjusting regions shape from {regions.shape} to {image.shape[1:]} (pyramid rounding mismatch)")
         regions = match_shape(regions, image.shape[1:])
-    if regions.max() > n_regions + 2:
+    if regions.max() > n_regions + 3:
         raise ValueError(
             f"--regions has label {int(regions.max())} but --ring-depths gives {n_regions} band(s) "
-            f"(labels up to {n_regions + 2}): pass the ring depths the regions were made with"
+            f"(labels up to {n_regions + 3}): pass the ring depths the regions were made with"
         )
 
     specs = parse_token_list(args.measure_channels)
@@ -326,7 +365,12 @@ def main():
         cells.insert(0, "dataset_id", args.dataset_id)
     cells.to_csv(args.output, index=False)
 
-    summary = summarize_image(labels, regions, n_regions, len(cells), pixel_size_yx)
+    gaps = measure_gaps(regions, n_regions, pixel_size_yx)
+    if args.dataset_id:
+        gaps.insert(0, "dataset_id", args.dataset_id)
+    gaps.to_csv(args.output_gaps, index=False)
+
+    summary = summarize_image(labels, regions, n_regions, len(cells), len(gaps), pixel_size_yx)
     for col in ("area", "aspect_ratio", "perimeter"):
         summary[f"mean_{col}"] = cells[col].mean() if col in cells.columns and len(cells) else np.nan
 
@@ -348,6 +392,8 @@ def main():
 
     print(f"Empty area: {summary['empty_area_pct']:.2f}% of the imaged area")
     print(f"Wrote {len(cells)} cell row(s) to {args.output}")
+    print(f"Wrote {len(gaps)} gap row(s) to {args.output_gaps} "
+          f"(excluded {summary['n_gaps'] - len(gaps)} touching the border)")
     print(f"Wrote image summary to {args.output_summary}")
 
 
