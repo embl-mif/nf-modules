@@ -40,7 +40,6 @@ workflow {
                 features_channels                         : Utils.normalizeOptionalText(row.channels),
                 features_extra_properties                 : Utils.normalizeOptionalText(row.extra_properties),
                 features_extra_intensity_properties       : Utils.normalizeOptionalText(row.extra_intensity_properties),
-                features_intensity_percentiles            : Utils.normalizeOptionalText(row.intensity_percentiles),
             ]
 
             tuple(meta, intensity_zarr, labels_zarr)

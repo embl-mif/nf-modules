@@ -1,6 +1,6 @@
-# resample_organo_cyte
+# resample_organoid_cyte
 
-Same as [organo_cyte](../organo_cyte/README.md), with a resampling step after conversion:
+Same as [organoid_cyte](../organoid_cyte/README.md), with a resampling step after conversion:
 converts microscopy datasets to OME-Zarr, changes their pixel size, segments each
 image tile by tile with Cellpose-SAM, merges labels across tile borders into one
 multiscale label OME-Zarr, and measures the labels against the image, writing one
@@ -9,7 +9,7 @@ features CSV per dataset.
 Segmentation and features run on the resampled image, so the labels have its pixel
 size and every pixel-based setting (tile sizes, `cellpose_diameter`, ROI in voxels)
 refers to the resampled grid. A row without a pixel size is not resampled: it is
-segmented and measured on the converted image, exactly as in `organo_cyte`.
+segmented and measured on the converted image, exactly as in `organoid_cyte`.
 
 ## Steps
 
@@ -30,7 +30,7 @@ segmented and measured on the converted image, exactly as in `organo_cyte`.
    6. `WRITE_RELABELED_TILE` – write every tile into the merged label store.
    7. `POPULATE_PYRAMID` – fill pyramid levels 1..N from level 0 (nearest-neighbour
       `Sample`, so label ids are preserved).
-4. `ZARRSMITH_FEATURE_EXTRACTION` – measure the labels against the (resampled) image
+4. `ORGANOIDCYTE_FEATURE_EXTRACTION` – measure the labels against the (resampled) image
    (`skimage.measure.regionprops`) and write a features CSV.
 
 ## Input CSV
@@ -49,7 +49,7 @@ must be an **absolute** path, or blank to use the default.
 
 ### 1. Conversion (`zarrsmith convert`)
 
-Same columns as [organo_cyte](../organo_cyte/README.md#1-conversion-zarrsmith-convert):
+Same columns as [organoid_cyte](../organoid_cyte/README.md#1-conversion-zarrsmith-convert):
 `output`, `microscope`, `chunk_size`, `max_size(MB)`, `scene_index`, `zarr_format`,
 `num_levels`, `downscale_factor`, `subset`, `channel_names`, `channel_colors`,
 `shards`, `shard_target_mb`, `shard_exclude_axes`, `num_workers`, `drop_singleton`.
@@ -73,7 +73,7 @@ neighbour. See [ZARRSMITH_RESAMPLE](../../modules/local/zarrsmith_resample/READM
 
 ### 3. Tiled Cellpose-SAM segmentation
 
-Same columns as [organo_cyte](../organo_cyte/README.md#2-tiled-cellpose-sam-segmentation):
+Same columns as [organoid_cyte](../organoid_cyte/README.md#2-tiled-cellpose-sam-segmentation):
 `tile_size_x`, `tile_size_y`, `tile_size_z`, `tile_overlap`, `resolution_level`,
 `use_physical_units`, `x_min` ... `z_max`, `cellpose_channels`, `cellpose_diameter`,
 `cellpose_niter`, `cellpose_flow_threshold`, `cellpose_cellprob_threshold`,
@@ -82,7 +82,7 @@ Same columns as [organo_cyte](../organo_cyte/README.md#2-tiled-cellpose-sam-segm
 
 ### 4. Feature extraction
 
-Same columns as [organo_cyte](../organo_cyte/README.md#3-feature-extraction):
+Same columns as [organoid_cyte](../organoid_cyte/README.md#3-feature-extraction):
 `features_output` (default `<outdir>/measurements/<dataset_id>_features.csv`),
 `intensity_resolution_level`, `labels_resolution_level`, `channels`,
 `extra_properties`, `extra_intensity_properties`, `intensity_percentiles`.
@@ -114,7 +114,7 @@ sample_02,/g/mif-hd/shared/data/sample_02.ome.tiff,opera,,1,,,,,25,0,,,
 ```bash
 module load Nextflow/25.10.1
 
-nextflow run /path/to/nf-modules/workflows/resample_organo_cyte/main.nf \
+nextflow run /path/to/nf-modules/workflows/resample_organoid_cyte/main.nf \
     -lib /path/to/nf-modules/lib \
     --input_csv /path/to/input.csv \
     --cellpose_model_path /g/mif-hd/shared/cellpose_models/cpsam \

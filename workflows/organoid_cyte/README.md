@@ -1,4 +1,4 @@
-# organo_cyte
+# organoid_cyte
 
 Converts microscopy datasets to OME-Zarr, tiles each converted image, segments
 every tile with Cellpose-SAM, matches and merges labels across tile borders
@@ -36,7 +36,7 @@ CSV per dataset.
       cannot open it); the converted one does, and is marked as a label image.
       Level 0 is copied unchanged and the pyramid is rebuilt with
       nearest-neighbour downsampling, so label ids are preserved.
-3. `ZARRSMITH_FEATURE_EXTRACTION` – measure the label OME-Zarr against the
+3. `ORGANOIDCYTE_FEATURE_EXTRACTION` – measure the label OME-Zarr against the
    converted OME-Zarr (`skimage.measure.regionprops`) and write a features CSV.
    Runs per dataset once its labels are complete.
 
@@ -150,7 +150,7 @@ label OME-Zarr; neither needs to be given. All columns are optional.
 | `extra_intensity_properties` | none | Extra `regionprops` properties that need an intensity image, e.g. `weighted_centroid`. |
 | `intensity_percentiles` | `25;75` | Percentiles (0–100) of each label's pixel intensities, per channel, e.g. `5;25;50;75;95`. The standard deviation is always measured. |
 
-See [feature_extraction](../feature_extraction/README.md) for the full list of
+See [ORGANOIDCYTE_FEATURE_EXTRACTION](../../modules/local/organoidcyte_feature_extraction/README.md) for the full list of
 measured properties and the output column naming.
 
 ### Example
@@ -187,7 +187,7 @@ with `nextflow clean` or by deleting the work directory.
 ```bash
 module load Nextflow/25.10.1
 
-nextflow run /path/to/nf-modules/workflows/organo_cyte/main.nf \
+nextflow run /path/to/nf-modules/workflows/organoid_cyte/main.nf \
     -lib /path/to/nf-modules/lib \
     --input_csv /path/to/input.csv \
     --cellpose_model_path /g/mif-hd/shared/cellpose_models/cpsam \

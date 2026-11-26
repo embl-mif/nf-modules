@@ -129,7 +129,6 @@ workflow {
             features_channels                   : Utils.normalizeOptionalText(m.features_channels),
             features_extra_properties           : Utils.normalizeOptionalText(m.features_extra_properties),
             features_extra_intensity_properties : Utils.normalizeOptionalText(m.features_extra_intensity_properties),
-            features_intensity_percentiles      : Utils.normalizeOptionalText(m.features_intensity_percentiles),
         ]
     }
 

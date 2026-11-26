@@ -5,7 +5,7 @@ nextflow.enable.dsl = 2
 include { ZARRSMITH_CONVERSION         } from '../../modules/local/zarrsmith_conversion/main'
 include { ZARRSMITH_RESAMPLE           } from '../../modules/local/zarrsmith_resample/main'
 include { TILED_CELLPOSE_SAM_ZARR      } from '../../subworkflows/local/tiled_cellpose_sam_zarr/main'
-include { ZARRSMITH_FEATURE_EXTRACTION } from '../../modules/local/zarrsmith_feature_extraction/main'
+include { ORGANOIDCYTE_FEATURE_EXTRACTION } from '../../modules/local/organoidcyte_feature_extraction/main'
 
 workflow {
     def default_features_dir = "${file(params.outdir)}/measurements"
@@ -149,6 +149,6 @@ workflow {
             tuple(features_meta, intensity, labels)
         }
 
-    ZARRSMITH_FEATURE_EXTRACTION(feature_inputs_ch)
+    ORGANOIDCYTE_FEATURE_EXTRACTION(feature_inputs_ch)
 
 }
