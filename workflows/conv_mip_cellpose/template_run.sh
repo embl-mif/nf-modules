@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=conv_mip_cellpose
-#SBATCH --partition=htc-el8
+#SBATCH --partition=htc-el10
 #SBATCH --mem=16G
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/%x_%j_%u.out

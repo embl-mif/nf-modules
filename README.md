@@ -130,7 +130,7 @@ mkdir -p logs
 sbatch template_run.sh
 ```
 
-The job runs the Nextflow controller on the `htc-el8` partition. Nextflow then
+The job runs the Nextflow controller on the `htc-el10` partition. Nextflow then
 submits every task as its own SLURM job, so the controller itself needs little
 memory. Logs go to `logs/<job-name>_<job-id>_<user>.out` / `.err`.
 
@@ -252,7 +252,7 @@ container and cache settings to your environment.
 | File | Content |
 | --- | --- |
 | [conf/base.config](conf/base.config) | CPU/memory/time per process label (`process_low`, `process_medium`, `process_high`, `process_high_memory`). Failed tasks with exit codes 1, 137, 140 or 143 (often out of memory or time) are retried with proportionally more resources. |
-| [conf/embl_hd.config](conf/embl_hd.config) | EMBL Heidelberg profile: SLURM executor, Apptainer and conda caches under `/g/mif-hd/shared/`, partition choice (`htc-el8`, `bigmem` for high memory per CPU, `gpu-el8` for GPU tasks). |
+| [conf/embl_hd.config](conf/embl_hd.config) | EMBL Heidelberg profile: SLURM executor, Apptainer and conda caches under `/g/mif-hd/shared/`, partition choice (`htc-el10`, `bigmem-el10` for high memory per CPU, `gpu-el10` for GPU tasks; set with `--cpu_queue`, `--bigmem_queue`, `--gpu_queue`). |
 | [conf/modules.config](conf/modules.config) | Per-process overrides, e.g. the GPU type and publish directory for Ultrack. |
 
 Each workflow's `nextflow.config` caps requests at `max_memory = 512.GB`,
