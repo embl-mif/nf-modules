@@ -1,6 +1,5 @@
 include { TILE_CONSTRUCTOR      } from '../../../modules/local/tileconstructor/main'
 include { CELLPOSE_SAM_ZARR_MIF } from '../../../modules/local/cellpose_sam_zarr_mif/main'
-include { FIND_TILE_NEIGHBORS   } from '../../../modules/local/find_tile_neighbors/main'
 include { LOCAL_LABEL_MATCHER   } from '../../../modules/local/local_label_matcher/main'
 include { LABEL_SOLVER          } from '../../../modules/local/label_solver/main'
 include { ZARRSMITH_FUSE_LABELS } from '../../../modules/local/zarrsmith_fuse_labels/main'
@@ -70,6 +69,13 @@ workflow TILED_CELLPOSE_SAM_ZARR {
                     tile_size_x: row.tile_size_x,
                     tile_size_y: row.tile_size_y,
                     tile_size_z: row.tile_size_z,
+                    // forward neighbours from the tile plan (blank at the end of an axis)
+                    right_dataset_id : row.right_dataset_id,
+                    right_tile_index : row.right_tile_index,
+                    bottom_dataset_id: row.bottom_dataset_id,
+                    bottom_tile_index: row.bottom_tile_index,
+                    behind_dataset_id: row.behind_dataset_id,
+                    behind_tile_index: row.behind_tile_index,
                     use_physical_units: false,
                     do_3D: parentMeta.do_3D ?: false,
                     zarr_output: "${row.dataset_id}_labels.ome.zarr",
@@ -100,39 +106,21 @@ workflow TILED_CELLPOSE_SAM_ZARR {
         }
         .map { csvPath -> tuple(csvPath.baseName.replace('_tiles_and_segmentations', ''), csvPath) }
 
-    ch_tile_neighbors_input = ch_tiles_and_segmentations_csv
-        .map { srcId, csv -> tuple([id: srcId], csv) }
-
-    FIND_TILE_NEIGHBORS(ch_tile_neighbors_input)
-
     ch_label_path_by_id = ch_all_labels
         .map { meta, label -> tuple(meta.id, label) }
         .toList()
         .map { pairs -> pairs.collectEntries { id, label -> [(id): label] } }
 
+    // Every tile's meta already names its forward neighbours (TILE_CONSTRUCTOR, from the
+    // tile plan); here they are only resolved to the neighbours' segmented stores.
     ch_local_matcher_input = ch_all_labels
-        .map { meta, label -> tuple(meta.id, meta + [label_offset_step: val_label_offset_step], label) }
-        .join(
-            FIND_TILE_NEIGHBORS.out.tile_neighbors.flatMap { srcMeta, csv ->
-                csv.splitCsv(header: true).collect { row -> tuple(row.dataset_id, row) }
-            }
-        )
         .combine(ch_label_path_by_id)
-        .map { tileId, meta, selfLabel, neighborRow, labelPathById ->
-            def fullMeta = meta + [
-                right_dataset_id : neighborRow.right_dataset_id,
-                right_tile_index : neighborRow.right_tile_index,
-                bottom_dataset_id: neighborRow.bottom_dataset_id,
-                bottom_tile_index: neighborRow.bottom_tile_index,
-                behind_dataset_id: neighborRow.behind_dataset_id,
-                behind_tile_index: neighborRow.behind_tile_index,
-            ]
+        .map { meta, selfLabel, labelPathById ->
+            def rightZarr  = labelPathById[meta.right_dataset_id]  ?: noNeighborZarr
+            def bottomZarr = labelPathById[meta.bottom_dataset_id] ?: noNeighborZarr
+            def behindZarr = labelPathById[meta.behind_dataset_id] ?: noNeighborZarr
 
-            def rightZarr  = labelPathById[neighborRow.right_dataset_id]  ?: noNeighborZarr
-            def bottomZarr = labelPathById[neighborRow.bottom_dataset_id] ?: noNeighborZarr
-            def behindZarr = labelPathById[neighborRow.behind_dataset_id] ?: noNeighborZarr
-
-            tuple(fullMeta, selfLabel, rightZarr, bottomZarr, behindZarr)
+            tuple(meta + [label_offset_step: val_label_offset_step], selfLabel, rightZarr, bottomZarr, behindZarr)
         }
 
     LOCAL_LABEL_MATCHER(ch_local_matcher_input)

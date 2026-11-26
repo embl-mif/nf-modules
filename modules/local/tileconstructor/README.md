@@ -32,3 +32,5 @@ The tiles are planned by ZarrSmith (`zarrsmith.utils.tiling.plan_tiles`, branch 
 | Name | Type | Description |
 | --- | --- | --- |
 | `tiles` | `tuple(meta, csv)` | Tile table (`*_tiles.csv`). `tile_size_<ax>`/`tile_overlap_<ax>` are the planned values; an axis left whole reports its ROI length and overlap 0 |
+
+Each row also names its forward neighbours from the tile plan: `right_dataset_id`/`right_tile_index` (next tile along x), `bottom_*` (along y) and `behind_*` (along z), blank at the end of an axis. LOCAL_LABEL_MATCHER compares each pair of touching tiles once, from the lower tile's side.

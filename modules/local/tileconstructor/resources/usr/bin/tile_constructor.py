@@ -15,6 +15,10 @@ cut area that fit. Without --max-tile-voxels, an axis without a tile size is one
 Bounds are in voxels of the chosen level, as half-open intervals [min, max). Each row
 has a unique dataset_id, <source_dataset_id>__<tile_id>. Tiles are numbered from 1, x
 fastest, then y, then z.
+
+Each row also names its forward neighbours, the next tile along x (right), y (bottom)
+and z (behind), blank at the end of an axis, so LOCAL_LABEL_MATCHER can compare every
+pair of touching tiles once, from the lower tile's side.
 """
 
 import argparse
@@ -29,7 +33,14 @@ FIELDNAMES = [
     "x_min", "x_max", "y_min", "y_max", "z_min", "z_max", "resolution_level",
     "tile_overlap_x", "tile_overlap_y", "tile_overlap_z",
     "tile_size_x", "tile_size_y", "tile_size_z",
+    "right_dataset_id", "right_tile_index",
+    "bottom_dataset_id", "bottom_tile_index",
+    "behind_dataset_id", "behind_tile_index",
 ]
+
+# Forward neighbour of a tile along each axis (the next tile of the plan's grid), as
+# LOCAL_LABEL_MATCHER names them: right = next along x, bottom = next along y, behind = next along z.
+NEIGHBOR_DIRECTIONS = {"x": "right", "y": "bottom", "z": "behind"}
 
 
 def _level_geometry(image: str, level: int) -> tuple[dict, dict, dict]:
@@ -102,11 +113,19 @@ def construct_tiles(args) -> None:
         resize=args.resize,
     )
 
+    def dataset_id(tile) -> str:
+        return f"{args.source_dataset_id}__{tile.tile_id}"
+
     rows = []
     for tile in plan.tiles:
         row = {key: "" for key in FIELDNAMES}
+        for ax, neighbor in plan.neighbors(tile).items():
+            if neighbor is not None:
+                direction = NEIGHBOR_DIRECTIONS[ax]
+                row[f"{direction}_dataset_id"] = dataset_id(neighbor)
+                row[f"{direction}_tile_index"] = neighbor.index
         row.update({
-            "dataset_id": f"{args.source_dataset_id}__{tile.tile_id}",
+            "dataset_id": dataset_id(tile),
             "source_dataset_id": args.source_dataset_id,
             "tile_id": tile.tile_id,
             "tile_index": tile.index,

@@ -13,18 +13,16 @@ against the converted image, writing one features CSV per dataset.
 2. `TILED_CELLPOSE_SAM_ZARR` (subworkflow) – segment the converted image tile
    by tile and merge the result into one intermediate label mask, kept only in
    the Nextflow work directory:
-   1. `TILE_CONSTRUCTOR` – compute the tile grid (and optional ROI).
-   2. `PREALLOCATE_ZARR` – pre-allocate the merged `uint32` label store.
-   3. `CELLPOSE_SAM_ZARR_MIF` – segment every tile on a GPU. With `-resume`,
+   1. `TILE_CONSTRUCTOR` – plan the tile grid with ZarrSmith (tile sizes, or
+      `max_tile_voxels`, and an optional ROI), with every tile's forward neighbours.
+   2. `CELLPOSE_SAM_ZARR_MIF` – segment every tile on a GPU. With `-resume`,
       tiles already segmented in a previous run are reused (see
       [Tile segmentations](#tile-segmentations)).
-   4. `FIND_TILE_NEIGHBORS` / `LOCAL_LABEL_MATCHER` – match labels between
-      neighbouring tiles.
-   5. `LABEL_SOLVER` – solve the label-matching graph into a global mapping.
-   6. `WRITE_RELABELED_TILE` – write every tile into the merged label store.
-   7. `POPULATE_PYRAMID` – fill pyramid levels 1..N of the merged mask from
-      the fully written level 0 (nearest-neighbour `Sample`, so label ids are
-      preserved).
+   3. `LOCAL_LABEL_MATCHER` – match labels between neighbouring tiles.
+   4. `LABEL_SOLVER` – solve the label-matching graph into a global mapping.
+   5. `ZARRSMITH_FUSE_LABELS` – fuse the tiles into one `uint32` label image with
+      `zarrsmith fuse`, renumbered by the global mapping, its pyramid sampled
+      (never averaged) to follow the source image.
 3. `ZARRSMITH_CONVERSION` (zarr → zarr) – convert the intermediate mask into the
    final label OME-Zarr (`labels_output_final`) with the metadata of the
    converted OME-Zarr.
@@ -110,7 +108,7 @@ All columns are optional.
 | --- | --- | --- |
 | `labels_output_final` | `<dataset_id>_merged_mask.ome.zarr` in the work dir | Path of the final label OME-Zarr. Absolute path to keep it. |
 
-The tiles are merged into an *intermediate* label mask (pyramid filled by `POPULATE_PYRAMID`) that is
+The tiles are merged into an *intermediate* label mask (fused by `ZARRSMITH_FUSE_LABELS`) that is
 only kept in the Nextflow work directory. `ZARRSMITH_CONVERSION` (zarr → zarr)
 then converts it into `labels_output_final`, a multiscale label OME-Zarr that
 reuses the conversion settings (axes, scales, pyramid levels, zarr format) of

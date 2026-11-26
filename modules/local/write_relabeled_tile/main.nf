@@ -23,7 +23,7 @@ process WRITE_RELABELED_TILE {
 
     // Whether this tile has a real forward neighbor on each axis -- decides whether its own
     // core region (the part it writes into the shared store) gets trimmed on that axis, see
-    // bin/write_relabeled_tile.py. Same right/bottom/behind_dataset_id fields FIND_TILE_NEIGHBORS
+    // bin/write_relabeled_tile.py. Same right/bottom/behind_dataset_id fields TILE_CONSTRUCTOR
     // already produces and LOCAL_LABEL_MATCHER already consumes for a different purpose.
     def has_right_arg  = meta.right_dataset_id  ? "--has-right"  : ""
     def has_bottom_arg = meta.bottom_dataset_id ? "--has-bottom" : ""
