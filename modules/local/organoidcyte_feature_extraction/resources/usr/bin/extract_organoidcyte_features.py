@@ -24,7 +24,9 @@ background std).
 
 import argparse
 import math
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -149,8 +151,22 @@ def parse_args():
             f"{DEFAULT_BACKGROUND_RADIUS:g} cell radii."
         ),
     )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help="Threads used to measure the background rings. Defaults to the CPUs available to the process.",
+    )
     parser.add_argument("--dataset-id", type=str, default=None)
     return parser.parse_args()
+
+
+def available_cpus() -> int:
+    # sched_getaffinity respects cgroup/cpuset limits (e.g. SLURM); it is not
+    # available on every platform.
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 1
 
 
 def parse_token_list(text: str | None) -> list[str]:
@@ -214,10 +230,25 @@ def equivalent_radius(area: np.ndarray, ndim: int) -> np.ndarray:
     return (area / unit_ball_volume) ** (1 / ndim)
 
 
+def compact_labels(label_image: np.ndarray) -> np.ndarray:
+    """Return the label image in an integer dtype of at most 4 bytes if possible.
+
+    Integer labels of up to 4 bytes are kept as they are (no copy). Wider or
+    non-integer labels are cast to int32 when their ids fit, else to int64.
+    """
+    if label_image.dtype.kind in "iu" and label_image.dtype.itemsize <= 4:
+        return label_image
+    max_label = int(label_image.max()) if label_image.size else 0
+    target = np.int32 if max_label <= np.iinfo(np.int32).max else np.int64
+    return label_image.astype(target, copy=False)
+
+
 def measure_local_background(
     label_image: np.ndarray,
     channel_images: list[np.ndarray],
+    regions: pd.DataFrame,
     radius_factor: float,
+    threads: int = 1,
 ) -> tuple[pd.DataFrame, list[pd.DataFrame]]:
     """Measure each label's local background ring in every channel.
 
@@ -226,46 +257,60 @@ def measure_local_background(
     measured on its own, so the rings of nearby labels can overlap and share
     pixels. Pixels of any label are never part of a ring.
 
+    `regions` is the structural regionprops table: its "label", "area" and
+    "bbox-*" columns give each label's size and bounding box, so the label
+    image is not scanned again. Labels are measured on `threads` threads
+    (scipy's distance transform releases the GIL).
+
     Returns a table of ring sizes ("label", "bg_area") and, for each channel
     in `channel_images`, a table of "label", "bg_median_intensity" and
     "bg_std_intensity" (population std, ddof=0). Labels with an empty ring
     have bg_area 0 and NaN background intensities.
     """
-    areas = np.bincount(label_image.ravel())
-    labels, bg_areas = [], []
-    medians = [[] for _ in channel_images]
-    stds = [[] for _ in channel_images]
+    ndim = label_image.ndim
+    labels = regions["label"].to_numpy()
+    max_distances = radius_factor * equivalent_radius(regions["area"].to_numpy(dtype=np.float64), ndim)
+    bbox_min = regions[[f"bbox-{axis}" for axis in range(ndim)]].to_numpy()
+    bbox_max = regions[[f"bbox-{axis + ndim}" for axis in range(ndim)]].to_numpy()
 
-    for index, bbox in enumerate(ndimage.find_objects(label_image)):
-        if bbox is None:
-            continue
-        label = index + 1
-        max_distance = radius_factor * float(equivalent_radius(areas[label], label_image.ndim))
+    def measure_one(i: int) -> tuple[int, list[float], list[float]]:
+        label, max_distance = labels[i], max_distances[i]
         margin = int(np.ceil(max_distance))
         crop = tuple(
-            slice(max(axis.start - margin, 0), min(axis.stop + margin, size))
-            for axis, size in zip(bbox, label_image.shape)
+            slice(max(int(lo) - margin, 0), min(int(hi) + margin, size))
+            for lo, hi, size in zip(bbox_min[i], bbox_max[i], label_image.shape)
         )
         crop_labels = label_image[crop]
         # Distance of every pixel in the crop to the nearest pixel of this label.
         distance = ndimage.distance_transform_edt(crop_labels != label)
         ring = (crop_labels == 0) & (distance <= max_distance)
+        del distance
         n_pixels = int(np.count_nonzero(ring))
+        if not n_pixels:
+            return 0, [np.nan] * len(channel_images), [np.nan] * len(channel_images)
+        medians, stds = [], []
+        for channel_image in channel_images:
+            # Native dtype: np.median and np.std accumulate in float64 anyway.
+            values = channel_image[crop][ring]
+            medians.append(float(np.median(values)))
+            stds.append(float(np.std(values, dtype=np.float64)))
+        return n_pixels, medians, stds
 
-        labels.append(label)
-        bg_areas.append(n_pixels)
-        for k, channel_image in enumerate(channel_images):
-            if n_pixels:
-                values = channel_image[crop][ring].astype(np.float64)
-                medians[k].append(float(np.median(values)))
-                stds[k].append(float(np.std(values)))
-            else:
-                medians[k].append(np.nan)
-                stds[k].append(np.nan)
+    if threads > 1 and len(labels) > 1:
+        with ThreadPoolExecutor(max_workers=threads) as executor:
+            results = list(executor.map(measure_one, range(len(labels))))
+    else:
+        results = [measure_one(i) for i in range(len(labels))]
 
-    area_df = pd.DataFrame({"label": labels, "bg_area": bg_areas}, dtype=np.int64)
+    area_df = pd.DataFrame({"label": labels, "bg_area": np.array([r[0] for r in results], dtype=np.int64)})
     channel_dfs = [
-        pd.DataFrame({"label": labels, "bg_median_intensity": medians[k], "bg_std_intensity": stds[k]})
+        pd.DataFrame(
+            {
+                "label": labels,
+                "bg_median_intensity": [r[1][k] for r in results],
+                "bg_std_intensity": [r[2][k] for r in results],
+            }
+        )
         for k in range(len(channel_images))
     ]
     return area_df, channel_dfs
@@ -402,6 +447,9 @@ def main():
     percentiles = parse_percentile_list(args.intensity_percentiles)
     if args.background_radius < 0:
         raise ValueError(f"--background-radius must be >= 0, got {args.background_radius:g}")
+    threads = args.threads if args.threads is not None else available_cpus()
+    if threads < 1:
+        raise ValueError(f"--threads must be >= 1, got {threads}")
 
     intensity_source = mm.ZarrManager(str(args.intensity))
     intensity_axes = intensity_source.metadata["axes"].lower()
@@ -476,7 +524,7 @@ def main():
 
     for t in timepoints:
         label_image = extract_frame(labels_data, {t_index_lbl: t} if t_index_lbl is not None else {})
-        label_image = label_image.astype(np.int64, copy=False)
+        label_image = compact_labels(label_image)
 
         first_channel_image = extract_frame(
             intensity_data,
@@ -493,22 +541,29 @@ def main():
 
         df = measure_structural_regions(label_image, extra_properties)
 
-        # Every channel of the frame is loaded up front so that each label's
-        # background ring is computed once and measured in all channels.
-        channel_images = [first_channel_image] + [
-            extract_frame(
+        def load_channel(channel_idx):
+            if channel_idx == channel_indices[0]:
+                return first_channel_image
+            return extract_frame(
                 intensity_data,
                 {c_index: channel_idx, **int_t_fixed, **({t_index_int: t} if t is not None and t_index_int is not None else {})},
             )
-            for channel_idx in channel_indices[1:]
-        ]
 
         backgrounds = [None] * len(channel_indices)
         if args.background_radius > 0:
-            bg_area, backgrounds = measure_local_background(label_image, channel_images, args.background_radius)
+            # Every channel is held in memory so that each label's background
+            # ring is computed once and measured in all channels.
+            channel_images = [load_channel(channel_idx) for channel_idx in channel_indices]
+            bg_area, backgrounds = measure_local_background(
+                label_image, channel_images, df, args.background_radius, threads
+            )
             df = df.merge(bg_area, on="label", how="left")
+        else:
+            # Without background columns, one channel at a time is enough.
+            channel_images = None
 
-        for channel_idx, channel_image, background in zip(channel_indices, channel_images, backgrounds):
+        for k, (channel_idx, background) in enumerate(zip(channel_indices, backgrounds)):
+            channel_image = channel_images[k] if channel_images is not None else load_channel(channel_idx)
             intensity_df = measure_intensity(
                 label_image,
                 channel_image,
@@ -522,6 +577,8 @@ def main():
         if t is not None:
             df.insert(0, "timepoint", t)
         frame_tables.append(df)
+        # Free this frame's images before the next frame is read.
+        del label_image, first_channel_image, channel_images, channel_image
 
     features = pd.concat(frame_tables, ignore_index=True) if frame_tables else pd.DataFrame()
     if args.dataset_id:

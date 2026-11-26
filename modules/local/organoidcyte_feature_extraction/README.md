@@ -58,7 +58,7 @@ A label's background is the ring of unlabelled (label `0`) pixels around it, up 
 
 Each label's ring is measured on its own: a background pixel within reach of several labels is part of all their rings, even if it is closer to another label. Pixels that belong to any label, the label itself or its neighbours, are never part of a ring.
 
-The rings are measured one label at a time, so this step takes longer with more labels and wider rings, especially in 3D. All measured channels of a frame are held in memory together while it runs.
+Each label's ring is measured separately, so this step takes longer with more labels and wider rings, especially in 3D. The labels are split over the task's CPUs (`task.cpus`, passed as `--threads`), so giving the process more CPUs makes it faster. While the rings are measured, all measured channels of a frame are held in memory together. With `meta.features_background_radius` set to `0`, the channels are read one at a time.
 
 The median is used for the background level because it is less affected by bright unsegmented objects in the ring than the mean. The noise is the standard deviation of the ring, which is where there is no cell signal.
 

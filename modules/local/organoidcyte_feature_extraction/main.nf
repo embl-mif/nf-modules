@@ -47,7 +47,8 @@ process ORGANOIDCYTE_FEATURE_EXTRACTION {
             ${extraPropertiesArg} \
             ${extraIntensityPropertiesArg} \
             ${intensityPercentilesArg} \
-            ${backgroundRadiusArg}
+            ${backgroundRadiusArg} \
+            --threads ${task.cpus}
     fi
 
     if [ ! -e ${shellQuote(output_csv)} ]; then
