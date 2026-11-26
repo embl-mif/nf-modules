@@ -145,6 +145,7 @@ workflow {
                 features_extra_properties                 : Utils.normalizeOptionalText(meta.extra_properties),
                 features_extra_intensity_properties       : Utils.normalizeOptionalText(meta.extra_intensity_properties),
                 features_intensity_percentiles            : Utils.normalizeOptionalText(meta.intensity_percentiles),
+                features_background_radius                : Utils.normalizeOptionalText(meta.background_radius),
             ]
             tuple(features_meta, intensity, labels)
         }

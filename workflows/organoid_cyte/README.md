@@ -148,7 +148,8 @@ label OME-Zarr; neither needs to be given. All columns are optional.
 | `channels` | every channel | Intensity channel indices to measure (`;`, `,` or space-separated). |
 | `extra_properties` | none | Extra `regionprops` properties, e.g. `inertia_tensor_eigvals feret_diameter_max`. |
 | `extra_intensity_properties` | none | Extra `regionprops` properties that need an intensity image, e.g. `weighted_centroid`. |
-| `intensity_percentiles` | `25;75` | Percentiles (0–100) of each label's pixel intensities, per channel, e.g. `5;25;50;75;95`. The standard deviation is always measured. |
+| `intensity_percentiles` | `25;75` | Percentiles (0–100) of each label's pixel intensities, per channel, e.g. `5;25;50;75;95`. The standard deviation and coefficient of variation are always measured. |
+| `background_radius` | `5` | Width of the ring of unlabelled pixels around each label used as its local background for the background, signal-to-background and signal-to-noise columns, in multiples of that label's equivalent radius. `0` disables these columns. |
 
 See [ORGANOIDCYTE_FEATURE_EXTRACTION](../../modules/local/organoidcyte_feature_extraction/README.md) for the full list of
 measured properties and the output column naming.

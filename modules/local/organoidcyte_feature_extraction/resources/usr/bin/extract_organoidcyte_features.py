@@ -7,17 +7,30 @@ user-requested structural and/or per-channel intensity properties), and
 write the resulting feature table as a single CSV.
 
 Per channel, the base intensity set is mean/min/max, the standard deviation
-("std_intensity") and the requested percentiles ("p25_intensity",
-"p75_intensity" by default) of each label's pixel intensities.
+("std_intensity"), the coefficient of variation ("cv_intensity" = std/mean)
+and the requested percentiles ("p25_intensity", "p75_intensity" by default)
+of each label's pixel intensities.
+
+Each label also gets a local background: the unlabelled (label 0) pixels
+within --background-radius times its own equivalent radius of its edge.
+Every label's ring is measured on its own, so the rings of nearby labels can
+overlap and share background pixels; pixels of any label are never part of
+a ring. Per channel, the
+background median and standard deviation are written, together with the
+signal-to-background ratio ("sbr_intensity" = mean / background median) and
+the signal-to-noise ratio ("snr_intensity" = (mean - background median) /
+background std).
 """
 
 import argparse
+import math
 import re
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import zarrsmith.microscope_manager as mm
+from scipy import ndimage
 from skimage.measure import regionprops_table
 
 # Shape/geometry properties always measured (when supported for the label
@@ -37,7 +50,9 @@ BASE_INTENSITY_PROPERTIES = ("label", "mean_intensity", "min_intensity", "max_in
 # Per-channel statistics always measured, keyed by every name (old and new
 # skimage spelling) a user might also pass in --extra-intensity-properties,
 # mapped to the column that already holds it. Requesting one of these again
-# would duplicate a column, so it is skipped.
+# would duplicate a column, so it is skipped. The std is not part of
+# BASE_INTENSITY_PROPERTIES: it is always added by measure_intensity through
+# the pixel_std_intensity extra function.
 ALREADY_MEASURED_INTENSITY_PROPERTIES = {
     "mean_intensity": "mean_intensity",
     "intensity_mean": "mean_intensity",
@@ -52,6 +67,10 @@ ALREADY_MEASURED_INTENSITY_PROPERTIES = {
 # Percentiles of each label's pixel intensities measured per channel when
 # --intensity-percentiles is not given.
 DEFAULT_INTENSITY_PERCENTILES = "25,75"
+
+# Width, in multiples of each label's own equivalent radius, of the ring of
+# unlabelled pixels around it used as its local background.
+DEFAULT_BACKGROUND_RADIUS = 5.0
 
 
 def pixel_std_intensity(regionmask: np.ndarray, intensity_image: np.ndarray) -> float:
@@ -117,6 +136,19 @@ def parse_args():
             f"Defaults to '{DEFAULT_INTENSITY_PERCENTILES}'."
         ),
     )
+    parser.add_argument(
+        "--background-radius",
+        type=float,
+        default=DEFAULT_BACKGROUND_RADIUS,
+        help=(
+            "Width of the ring of unlabelled (label 0) pixels around each "
+            "label used as its local background for the bg_*, sbr_intensity "
+            "and snr_intensity columns, in multiples of the label's "
+            "equivalent radius (the radius of a circle/sphere of the same "
+            "area/volume). 0 disables these columns. Defaults to "
+            f"{DEFAULT_BACKGROUND_RADIUS:g} cell radii."
+        ),
+    )
     parser.add_argument("--dataset-id", type=str, default=None)
     return parser.parse_args()
 
@@ -171,6 +203,74 @@ def percentile_column_name(percentile: float) -> str:
     return f"p{text.replace('.', '_')}_intensity"
 
 
+def safe_divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    """numerator / denominator, NaN where the denominator is 0 or NaN."""
+    return numerator / denominator.where(denominator != 0)
+
+
+def equivalent_radius(area: np.ndarray, ndim: int) -> np.ndarray:
+    """Radius of the ndim-ball whose volume is `area` pixels."""
+    unit_ball_volume = math.pi ** (ndim / 2) / math.gamma(ndim / 2 + 1)
+    return (area / unit_ball_volume) ** (1 / ndim)
+
+
+def measure_local_background(
+    label_image: np.ndarray,
+    channel_images: list[np.ndarray],
+    radius_factor: float,
+) -> tuple[pd.DataFrame, list[pd.DataFrame]]:
+    """Measure each label's local background ring in every channel.
+
+    A label's ring is every unlabelled (label 0) pixel within `radius_factor`
+    times the label's equivalent radius of the label's edge. Each label is
+    measured on its own, so the rings of nearby labels can overlap and share
+    pixels. Pixels of any label are never part of a ring.
+
+    Returns a table of ring sizes ("label", "bg_area") and, for each channel
+    in `channel_images`, a table of "label", "bg_median_intensity" and
+    "bg_std_intensity" (population std, ddof=0). Labels with an empty ring
+    have bg_area 0 and NaN background intensities.
+    """
+    areas = np.bincount(label_image.ravel())
+    labels, bg_areas = [], []
+    medians = [[] for _ in channel_images]
+    stds = [[] for _ in channel_images]
+
+    for index, bbox in enumerate(ndimage.find_objects(label_image)):
+        if bbox is None:
+            continue
+        label = index + 1
+        max_distance = radius_factor * float(equivalent_radius(areas[label], label_image.ndim))
+        margin = int(np.ceil(max_distance))
+        crop = tuple(
+            slice(max(axis.start - margin, 0), min(axis.stop + margin, size))
+            for axis, size in zip(bbox, label_image.shape)
+        )
+        crop_labels = label_image[crop]
+        # Distance of every pixel in the crop to the nearest pixel of this label.
+        distance = ndimage.distance_transform_edt(crop_labels != label)
+        ring = (crop_labels == 0) & (distance <= max_distance)
+        n_pixels = int(np.count_nonzero(ring))
+
+        labels.append(label)
+        bg_areas.append(n_pixels)
+        for k, channel_image in enumerate(channel_images):
+            if n_pixels:
+                values = channel_image[crop][ring].astype(np.float64)
+                medians[k].append(float(np.median(values)))
+                stds[k].append(float(np.std(values)))
+            else:
+                medians[k].append(np.nan)
+                stds[k].append(np.nan)
+
+    area_df = pd.DataFrame({"label": labels, "bg_area": bg_areas}, dtype=np.int64)
+    channel_dfs = [
+        pd.DataFrame({"label": labels, "bg_median_intensity": medians[k], "bg_std_intensity": stds[k]})
+        for k in range(len(channel_images))
+    ]
+    return area_df, channel_dfs
+
+
 def sanitize_suffix(text: str) -> str:
     return re.sub(r"[^0-9A-Za-z]+", "_", text).strip("_") or "channel"
 
@@ -211,6 +311,7 @@ def measure_intensity(
     suffix: str,
     extra_intensity_properties: list[str],
     percentiles: list[float],
+    background: pd.DataFrame | None,
 ) -> pd.DataFrame:
     properties = BASE_INTENSITY_PROPERTIES + tuple(extra_intensity_properties)
     extra_functions = [pixel_std_intensity]
@@ -243,6 +344,15 @@ def measure_intensity(
             },
         }
     )
+
+    df["cv_intensity"] = safe_divide(df["std_intensity"], df["mean_intensity"])
+
+    if background is not None:
+        # A label with no unlabelled pixel in its ring (e.g. packed in by its
+        # neighbours) has NaN background columns.
+        df = df.merge(background, on="label", how="left")
+        df["sbr_intensity"] = safe_divide(df["mean_intensity"], df["bg_median_intensity"])
+        df["snr_intensity"] = safe_divide(df["mean_intensity"] - df["bg_median_intensity"], df["bg_std_intensity"])
 
     return df.rename(columns={col: f"{col}_{suffix}" for col in df.columns if col != "label"})
 
@@ -290,6 +400,8 @@ def main():
     extra_properties = parse_token_list(args.extra_properties)
     extra_intensity_properties = drop_already_measured(parse_token_list(args.extra_intensity_properties))
     percentiles = parse_percentile_list(args.intensity_percentiles)
+    if args.background_radius < 0:
+        raise ValueError(f"--background-radius must be >= 0, got {args.background_radius:g}")
 
     intensity_source = mm.ZarrManager(str(args.intensity))
     intensity_axes = intensity_source.metadata["axes"].lower()
@@ -381,17 +493,29 @@ def main():
 
         df = measure_structural_regions(label_image, extra_properties)
 
-        for channel_idx in channel_indices:
-            channel_image = (
-                first_channel_image
-                if channel_idx == channel_indices[0]
-                else extract_frame(
-                    intensity_data,
-                    {c_index: channel_idx, **int_t_fixed, **({t_index_int: t} if t is not None and t_index_int is not None else {})},
-                )
+        # Every channel of the frame is loaded up front so that each label's
+        # background ring is computed once and measured in all channels.
+        channel_images = [first_channel_image] + [
+            extract_frame(
+                intensity_data,
+                {c_index: channel_idx, **int_t_fixed, **({t_index_int: t} if t is not None and t_index_int is not None else {})},
             )
+            for channel_idx in channel_indices[1:]
+        ]
+
+        backgrounds = [None] * len(channel_indices)
+        if args.background_radius > 0:
+            bg_area, backgrounds = measure_local_background(label_image, channel_images, args.background_radius)
+            df = df.merge(bg_area, on="label", how="left")
+
+        for channel_idx, channel_image, background in zip(channel_indices, channel_images, backgrounds):
             intensity_df = measure_intensity(
-                label_image, channel_image, channel_suffixes[channel_idx], extra_intensity_properties, percentiles
+                label_image,
+                channel_image,
+                channel_suffixes[channel_idx],
+                extra_intensity_properties,
+                percentiles,
+                background,
             )
             df = df.merge(intensity_df, on="label")
 

@@ -27,6 +27,8 @@ process ORGANOIDCYTE_FEATURE_EXTRACTION {
     def extraIntensityPropertiesArg = meta.features_extra_intensity_properties ? "--extra-intensity-properties ${shellQuote(meta.features_extra_intensity_properties)}" : ""
     // Unset -> the script's default percentiles (25 and 75).
     def intensityPercentilesArg = meta.features_intensity_percentiles ? "--intensity-percentiles ${shellQuote(meta.features_intensity_percentiles)}" : ""
+    // Unset -> the script's default ring width (5 cell radii); 0 disables the background columns.
+    def backgroundRadiusArg = meta.features_background_radius != null ? "--background-radius ${shellQuote(meta.features_background_radius)}" : ""
 
     """
     if [ -e ${shellQuote(output_csv)} ]; then
@@ -44,7 +46,8 @@ process ORGANOIDCYTE_FEATURE_EXTRACTION {
             ${channelsArg} \
             ${extraPropertiesArg} \
             ${extraIntensityPropertiesArg} \
-            ${intensityPercentilesArg}
+            ${intensityPercentilesArg} \
+            ${backgroundRadiusArg}
     fi
 
     if [ ! -e ${shellQuote(output_csv)} ]; then
