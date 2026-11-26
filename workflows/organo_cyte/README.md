@@ -82,7 +82,7 @@ All columns are optional.
 
 | CSV column | Default if not set | Description |
 | --- | --- | --- |
-| `tile_size_x`, `tile_size_y`, `tile_size_z` | cut by ZarrSmith to fit `max_tile_voxels` | Tile size per axis. An axis without one is split only as much as `max_tile_voxels` needs. |
+| `tile_size_x`, `tile_size_y`, `tile_size_z` | cut by ZarrSmith to fit `max_tile_voxels` | Tile size per axis: whole voxels, or any size (e.g. `60.5`) with `use_physical_units`. An axis without one is split only as much as `max_tile_voxels` needs. |
 | `max_tile_voxels` | `--max_tile_voxels`, else 300000000 | Most voxels one Cellpose tile may read, halo included (300 M fits the first attempt of the `gpu` label in `conf/embl_hd.config`). |
 | `tile_resize` | 1 | Multiplies the voxels counted against `max_tile_voxels` (`tile_resize ** ndim`), e.g. when the budget was measured on rescaled tiles. |
 | `tile_overlap` | `0` | Overlap between neighbouring tiles. |

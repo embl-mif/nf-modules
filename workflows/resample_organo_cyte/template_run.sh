@@ -30,6 +30,9 @@ export MDL="/g/mif-hd/shared/cellpose_models/cpsam" # <--- MODIFY IF USING A DIF
 #   --resolution_level             pyramid level for tiling/segmentation when a CSV row has none (default: 0)
 #   --intensity_resolution_level   pyramid level of the image used for feature extraction (default: 0)
 #   --labels_resolution_level      pyramid level of the mask used for feature extraction (default: 0)
+#   --max_tile_voxels              most voxels one Cellpose tile may read, halo included, for images whose CSV
+#                                  row has no max_tile_voxels (default: 300000000); tile sizes, overlap and
+#                                  halo are CSV columns (tile_size_x/y/z, tile_overlap, cellpose_halo)
 #   --label_offset_step            label-ID offset step between tiles (default: 100000)
 #   --multicut_beta                LABEL_SOLVER edge-cut trade-off (default: 0.5)
 EXTRA_ARGS=(
@@ -38,6 +41,7 @@ EXTRA_ARGS=(
     # --resolution_level 0
     # --intensity_resolution_level 0
     # --labels_resolution_level 0
+    # --max_tile_voxels 300000000
     # --label_offset_step 100000
     # --multicut_beta 0.5
 )

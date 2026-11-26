@@ -382,6 +382,36 @@ class Utils {
         }
     }
 
+    /**
+     * A tile size from a CSV cell (tile_size_x/y/z): a whole number of voxels (``512``, ``512.0``),
+     * or, with ``physicalUnits``, any positive number (``60.5`` micrometers). Empty -> null.
+     */
+    static Number parseTileSize(def value, boolean physicalUnits, String columnName) {
+        def text = normalizeOptionalText(value)
+        if (!text) {
+            return null
+        }
+        BigDecimal number
+        try {
+            number = new BigDecimal(text)
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid '${columnName}' value '${value}'. Expected a number.", e)
+        }
+        if (number <= 0) {
+            throw new IllegalArgumentException("Invalid '${columnName}' value '${value}'. Expected a positive number.")
+        }
+        if (physicalUnits) {
+            return number.doubleValue()
+        }
+        try {
+            return number.intValueExact()
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException(
+                "Invalid '${columnName}' value '${value}': a size in voxels must be a whole number " +
+                "(set use_physical_units to true for a size in physical units).", e)
+        }
+    }
+
     static Integer parseOptionalInt(def value, String columnName) {
         if (!value) {
             return null

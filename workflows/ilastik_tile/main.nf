@@ -47,6 +47,7 @@ workflow {
 
         def resolution_level   = Utils.normalizeOptionalText(meta.resolution_level)
         def use_physical_units = Utils.normalizeOptionalText(meta.use_physical_units)
+        def physical_units     = use_physical_units ? use_physical_units.toBoolean() : false
 
         def x_min = Utils.normalizeOptionalText(meta.x_min)
         def x_max = Utils.normalizeOptionalText(meta.x_max)
@@ -58,15 +59,16 @@ workflow {
         [
             id                 : meta.id,
 
-            tile_size_x        : tile_size_x  ? tile_size_x  as int   : null,
-            tile_size_y        : tile_size_y  ? tile_size_y  as int   : null,
-            tile_size_z        : tile_size_z  ? tile_size_z  as int   : null,
+            // whole voxels, or any size with use_physical_units (e.g. 60.5 micrometers)
+            tile_size_x        : Utils.parseTileSize(tile_size_x, physical_units, 'tile_size_x'),
+            tile_size_y        : Utils.parseTileSize(tile_size_y, physical_units, 'tile_size_y'),
+            tile_size_z        : Utils.parseTileSize(tile_size_z, physical_units, 'tile_size_z'),
             tile_overlap       : tile_overlap ? tile_overlap as float : null,
             halo               : halo ? halo as float : null,
             // axes without a tile size are cut to fit this budget; without either they are one tile
             max_tile_voxels    : max_tile_voxels ? new BigDecimal(max_tile_voxels).toBigInteger() : null,
             resolution_level   : resolution_level ? resolution_level as int : null,
-            use_physical_units : use_physical_units ? use_physical_units.toBoolean() : false,
+            use_physical_units : physical_units,
 
             x_min : x_min ? x_min as float : null,
             x_max : x_max ? x_max as float : null,
