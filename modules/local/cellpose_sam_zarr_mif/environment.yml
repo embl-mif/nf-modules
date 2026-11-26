@@ -1,0 +1,21 @@
+name: cellpose_zarr
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - git
+  - pip
+  - pip:
+      # PyTorch built for CUDA 12.8: the oldest build that runs on every GPU of the cluster,
+      # Blackwell (RTX PRO 6000/4500, B200) included; the GPU nodes' driver (610) supports it.
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch==2.8.0+cu128
+      - numpy==2.4.4
+      - zarr==3.1.6
+      # ZarrSmith at a commit of branch consolidated_translation (not released yet): read_region,
+      # label writing, infer_downscale_factors. The same commit as the ZarrSmith modules' environment.
+      - "zarrsmith @ git+https://github.com/embl-mif/zarrsmith.git@9b32802585003bc69455397bab189e5560c9bcf9"
+      - aiohttp>=3.9,<4
+      - requests>=2.32,<3
+      - cellpose==4.1.1

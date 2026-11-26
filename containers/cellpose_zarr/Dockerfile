@@ -7,9 +7,9 @@ ARG CELLPOSE_VERSION=4.1.1
 ARG ZARR_VERSION=3.1.6
 ARG NUMPY_VERSION=2.4.4
 # ZarrSmith reads the input regions and writes the label stores (cellpose_sam_zarr.py).
-# Pinned to a commit of branch consolidated_translation (read_region, label writing),
-# which is not released yet: pin a release once there is one.
-ARG ZARRSMITH_REF=52b99a296680cbb147e41700674d83d2a7e47953
+# Pinned to a commit of branch consolidated_translation (read_region, label writing,
+# infer_downscale_factors), which is not released yet: pin a release once there is one.
+ARG ZARRSMITH_REF=9b32802585003bc69455397bab189e5560c9bcf9
 
 FROM python:${PYTHON_VERSION}-slim
 

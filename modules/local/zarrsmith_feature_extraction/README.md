@@ -1,6 +1,6 @@
 # ZARRSMITH_FEATURE_EXTRACTION
 
-Measures every label of a label OME-Zarr against an intensity OME-Zarr with `skimage.measure.regionprops` (shape properties plus per-channel intensities) and writes one CSV row per label.
+Measures every label of a label OME-Zarr against an intensity OME-Zarr with `skimage.measure.regionprops` (shape properties plus per-channel intensities) and writes one CSV row per label, with `zarrsmith measure`. List options (`features_channels`, `features_extra_properties`, `features_extra_intensity_properties`) may be separated by `;`, `,` or spaces.
 
 ## Input
 | Name | Type | Description |

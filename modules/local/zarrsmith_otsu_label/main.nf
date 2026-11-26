@@ -1,7 +1,9 @@
 process ZARRSMITH_OTSU_LABEL {
     tag "${meta.id}"
     label 'process_high'
-    container 'ghcr.io/embl-mif/zarrsmith:0.6.5'
+    // `zarrsmith threshold`, from the conda environment in environment.yml (a commit of ZarrSmith's
+    // branch consolidated_translation, not released yet; pin a release once it is out).
+    conda "${moduleDir}/environment.yml"
 
     input:
     tuple val(meta), path(input_zarr)
@@ -20,8 +22,8 @@ process ZARRSMITH_OTSU_LABEL {
         "'${value.toString().replace("'", "'\"'\"'")}'"
     }
 
-    def resolutionLevelArg = meta.otsu_resolution_level != null ? "--resolution-level ${meta.otsu_resolution_level}" : ""
-    def otsuMultiplierArg = meta.otsu_multiplier != null ? "--otsu-multiplier ${meta.otsu_multiplier}" : ""
+    def resolutionLevelArg = meta.otsu_resolution_level != null ? "-lv ${meta.otsu_resolution_level}" : ""
+    def otsuMultiplierArg = meta.otsu_multiplier != null ? "-fa ${meta.otsu_multiplier}" : ""
 
     """
     out=${shellQuote(output_labels)}
@@ -34,10 +36,11 @@ process ZARRSMITH_OTSU_LABEL {
         fi
         mkdir -p "\$(dirname "\$out")"
 
-        create_zarrsmith_otsu_label.py \
-            --input "${input_zarr}" \
-            --output "${output_labels}" \
-            --channel ${meta.otsu_channel} \
+        # Otsu threshold x factor at one level, connected components, the labels on every level
+        zarrsmith threshold \
+            -i "${input_zarr}" \
+            -z "${output_labels}" \
+            -c ${shellQuote(meta.otsu_channel)} \
             ${resolutionLevelArg} \
             ${otsuMultiplierArg}
     fi

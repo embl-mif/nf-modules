@@ -2,9 +2,8 @@ process TILE_CONSTRUCTOR {
     tag "$meta.id"
     label 'process_low'
 
-    // Needs ZarrSmith's tile planner (zarrsmith.utils.tiling.plan_tiles, branch
-    // consolidated_translation, not released yet). Pin this to the release version once it is out.
-    container 'ghcr.io/embl-mif/zarrsmith:consolidated_translation'
+    // `zarrsmith plan-tiles`, from the conda environment in environment.yml (a commit of ZarrSmith's
+    // branch consolidated_translation, not released yet; pin a release once it is out).
     conda "${moduleDir}/environment.yml"
 
     input:
@@ -16,28 +15,31 @@ process TILE_CONSTRUCTOR {
     script:
     def image = image_uri ?: local_image
     def output_csv = "${meta.id}_tiles.csv"
-    def optional = { flag, value -> value != null ? "${flag} ${value}" : "" }
+    def shellQuote = { value -> "'${value.toString().replace("'", "'\"'\"'")}'" }
+    def present = { value -> value != null && value.toString().trim() }
+    // tile sizes per axis ("x=512;y=512"), and the part of the level to tile ("x=0:900;z=10:")
+    def tileSize = ['x', 'y', 'z'].findAll { present(meta["tile_size_${it}"]) }
+        .collect { "${it}=${meta["tile_size_${it}"]}" }.join(';')
+    def roi = ['x', 'y', 'z'].findAll { present(meta["${it}_min"]) || present(meta["${it}_max"]) }
+        .collect { "${it}=${present(meta["${it}_min"]) ? meta["${it}_min"] : ''}:${present(meta["${it}_max"]) ? meta["${it}_max"] : ''}" }
+        .join(';')
+    def optional = { flag, value -> present(value) ? "${flag} ${shellQuote(value)}" : "" }
 
+    // zarrsmith plan-tiles: one row per tile, with its bounds and its forward neighbours
+    // (right/bottom/behind_dataset_id), in the voxels of --level unless --physical.
     """
-    tile_constructor.py \\
-        --source-dataset-id "${meta.id}" \\
-        --input-image-path \"${image}\" \\
-        --output-csv ${output_csv} \\
-        ${optional('--tile-size-x', meta.tile_size_x)} \\
-        ${optional('--tile-size-y', meta.tile_size_y)} \\
-        ${optional('--tile-size-z', meta.tile_size_z)} \\
-        ${optional('--max-tile-voxels', meta.max_tile_voxels)} \\
-        ${optional('--resize', meta.tile_resize)} \\
-        ${optional('--tile-overlap', meta.tile_overlap)} \\
-        ${optional('--halo', meta.halo)} \\
-        ${optional('--resolution-level', meta.resolution_level)} \\
-        ${optional('--x-min', meta.x_min)} \\
-        ${optional('--x-max', meta.x_max)} \\
-        ${optional('--y-min', meta.y_min)} \\
-        ${optional('--y-max', meta.y_max)} \\
-        ${optional('--z-min', meta.z_min)} \\
-        ${optional('--z-max', meta.z_max)} \\
-        ${meta.use_physical_units ? '--use-physical-units' : ''}
+    zarrsmith plan-tiles \\
+        -i ${shellQuote(image)} \\
+        -oc ${output_csv} \\
+        -id ${shellQuote(meta.id)} \\
+        ${optional('-lv', meta.resolution_level)} \\
+        ${optional('-ts', tileSize)} \\
+        ${optional('-mtv', meta.max_tile_voxels)} \\
+        ${optional('-rs', meta.tile_resize)} \\
+        ${optional('-ov', meta.tile_overlap)} \\
+        ${optional('-ha', meta.halo)} \\
+        ${optional('-roi', roi)} \\
+        ${meta.use_physical_units ? '-pu' : ''}
     """
 
     stub:

@@ -34,6 +34,7 @@ import numpy as np
 import zarr
 
 from zarrsmith.microscope_manager import ArrayManager, ZarrManager
+from zarrsmith.utils.dataset_ops import infer_downscale_factors
 
 SPATIAL = ("z", "y", "x")
 
@@ -303,17 +304,6 @@ def segment_block(
 # Output
 # ---------------------------------------------------------------------------
 
-def source_pyramid(md: dict, level: int) -> tuple[int, tuple[int, int, int]]:
-    """Levels of the source from ``level`` on, and the (z, y, x) factor between them."""
-    scales = md["scales"]
-    spatial = [ax for ax in md["axes"] if ax in SPATIAL]
-    levels = len(scales) - level
-    if levels <= 1:
-        return 1, (1, 2, 2)
-    ratio = {ax: scales[level + 1][i] / scales[level][i] for i, ax in enumerate(spatial)}
-    return levels, tuple(max(1, round(ratio.get(ax, 1.0))) for ax in SPATIAL)
-
-
 def write_labels(
     output_zarr: str,
     labels: np.ndarray,
@@ -349,7 +339,7 @@ def write_labels(
             if md.get(key) is not None:
                 out_md[key] = md[key]
 
-    levels, factor = source_pyramid(md, level)
+    levels, factor = infer_downscale_factors(md, level)  # the source's pyramid from `level` on
     if num_levels is not None:
         levels = max(1, int(num_levels))
     manager = ArrayManager([da.from_array(labels, chunks=chunks)], out_md)

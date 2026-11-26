@@ -1,7 +1,9 @@
 process ZARRSMITH_FILTER {
     tag "${meta.id}"
     label 'process_high'
-    container 'ghcr.io/embl-mif/zarrsmith:0.6.5'
+    // `zarrsmith filter-labels`, from the conda environment in environment.yml (a commit of ZarrSmith's
+    // branch consolidated_translation, not released yet; pin a release once it is out).
+    conda "${moduleDir}/environment.yml"
 
     input:
     tuple val(meta), path(labels_zarr), path(csv_file)
@@ -22,8 +24,8 @@ process ZARRSMITH_FILTER {
         "'${value.toString().replace("'", "'\"'\"'")}'"
     }
 
-    def minAreaArg = meta.filter_min_area != null ? "--min-area ${meta.filter_min_area}" : ""
-    def maxAreaArg = meta.filter_max_area != null ? "--max-area ${meta.filter_max_area}" : ""
+    def minAreaArg = meta.filter_min_area != null ? "--min_area ${meta.filter_min_area}" : ""
+    def maxAreaArg = meta.filter_max_area != null ? "--max_area ${meta.filter_max_area}" : ""
     def filtersArg = meta.filter_properties ? "--filters ${shellQuote(meta.filter_properties)}" : ""
 
     """
@@ -38,11 +40,11 @@ process ZARRSMITH_FILTER {
         mkdir -p "\$(dirname "\$out")"
         mkdir -p \$(dirname ${shellQuote(output_csv)})
 
-        filter_zarrsmith_labels.py \
-            --labels "${labels_zarr}" \
-            --csv "${csv_file}" \
-            --output "${output_labels}" \
-            --output-csv "${output_csv}" \
+        zarrsmith filter-labels \
+            -l "${labels_zarr}" \
+            -tb "${csv_file}" \
+            -z "${output_labels}" \
+            -oc "${output_csv}" \
             ${minAreaArg} \
             ${maxAreaArg} \
             ${filtersArg}

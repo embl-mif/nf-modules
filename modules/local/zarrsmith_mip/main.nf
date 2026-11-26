@@ -1,7 +1,9 @@
 process ZARRSMITH_MIP {
     tag "${meta.id}"
     label 'process_medium'
-    container 'ghcr.io/embl-mif/zarrsmith:0.6.5'
+    // `zarrsmith project`, from the conda environment in environment.yml (a commit of ZarrSmith's
+    // branch consolidated_translation, not released yet; pin a release once it is out).
+    conda "${moduleDir}/environment.yml"
 
     input:
     tuple val(meta), path(input_zarr)
@@ -33,9 +35,10 @@ process ZARRSMITH_MIP {
         fi
         mkdir -p "\$(dirname "\$out")"
 
-        create_zarrsmith_mip.py \
-            --input "${input_zarr}" \
-            --output "${output_mip}"
+        # maximum intensity projection along z, on every pyramid level
+        zarrsmith project \
+            -i "${input_zarr}" \
+            -z "${output_mip}"
     fi
 
     if [ ! -e ${shellQuote(output_mip)}/zarr.json ] && [ ! -e ${shellQuote(output_mip)}/.zgroup ]; then

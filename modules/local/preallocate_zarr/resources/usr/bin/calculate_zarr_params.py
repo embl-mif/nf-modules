@@ -34,7 +34,7 @@ def calculate_params(tiles_csv: str, source_zarr: str) -> dict:
         raise ValueError(f"{tiles_csv} has no tile rows")
 
     # resolution_level is a plain CSV column, constant across every row of one
-    # source image (written once per image by tile_constructor.py) -- read it
+    # source image (written once per image by TILE_CONSTRUCTOR, `zarrsmith plan-tiles`) -- read it
     # here rather than threading it in separately as another CLI argument.
     resolution_level = int(rows[0]["resolution_level"])
 

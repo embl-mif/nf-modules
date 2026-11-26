@@ -63,8 +63,9 @@ process CELLPOSE_SAM_ZARR_MIF {
     maxRetries 2
     
     // Set up environment
-    // Cellpose-SAM 4.1.1 with ZarrSmith (containers/cellpose_zarr, VERSION 4.1.1-zs1)
-    container "ghcr.io/embl-mif/cellpose_zarr:4.1.1-zs1"
+    // Cellpose-SAM 4.1.1, PyTorch (CUDA 12.8) and ZarrSmith, from the conda environment in
+    // environment.yml (the same packages as containers/cellpose_zarr)
+    conda "${moduleDir}/environment.yml"
 
     input:
     tuple val(meta), path(local_image), val(image_uri)

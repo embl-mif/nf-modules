@@ -1,16 +1,16 @@
 # ZARRSMITH_FUSE_LABELS
 
-Merges the label tiles of one tiled segmentation (CELLPOSE_SAM_ZARR_MIF, one store per tile) into one OME-Zarr label image, with `zarrsmith fuse -m zarr --label_offsets ... --label_mapping ...` (no blending, label data). It replaces PREALLOCATE_ZARR, WRITE_RELABELED_TILE and POPULATE_PYRAMID in the tiled Cellpose subworkflow.
+Merges the label tiles of one tiled segmentation (CELLPOSE_SAM_ZARR_MIF, one store per tile) into one OME-Zarr label image, with `zarrsmith fuse-labels --tiles_csv ... --label_offset_step ... --label_mapping ...` (no blending, label data). It replaces PREALLOCATE_ZARR, WRITE_RELABELED_TILE and POPULATE_PYRAMID in the tiled Cellpose subworkflow.
 
 - **Placement:** each tile sits at the NGFF translation of its own store, so no tile bounds are needed.
-- **Numbering:** labels are numbered as LOCAL_LABEL_MATCHER numbered the graph nodes (every non-zero id + `tile_index * label_offset_step`, written by `fuse_labels_inputs.py` as the `--label_offsets` CSV), then LABEL_SOLVER's global mapping (`--label_mapping`) merges the objects split between tiles.
+- **Numbering:** labels are numbered as LOCAL_LABEL_MATCHER numbered the graph nodes (every non-zero id + `tile_index * label_offset_step`, from the tiles CSV; zarrsmith first checks that the staged stores and the CSV list the same tiles, and writes the offsets it used to `<output name>.label_offsets.csv` next to the output), then LABEL_SOLVER's global mapping (`--label_mapping`) merges the objects split between tiles.
 - **No blending:** every voxel is copied from one tile, and an overlap is cut in its middle. Pyramid levels sample voxels instead of averaging them, so ids are never mixed.
-- **Pyramid:** follows the source image from `resolution_level` on (`-nl`/`-df` worked out by `fuse_labels_inputs.py`), so level k of the labels matches level `resolution_level + k` of the image.
+- **Pyramid:** follows the source image from `resolution_level` on (`--infer_downscale_factors <source> --start_level <resolution_level>`; `num_levels`/`downscale_factor` override it), so level k of the labels matches level `resolution_level + k` of the image.
 - **Layout:** chunks, shards and the number of fusion workers follow `zarrsmith fuse`'s defaults (about 4 MB chunks, 256 MB shards, workers cut to what fits in memory, at most `task.cpus`).
 
-The output is written in full each time (an existing store is replaced, once the fusion has succeeded). `zarrsmith fuse` also writes `<output>.transforms.json` (the position of every tile) next to the output.
+The output is written in full each time (an existing store is replaced, once the fusion has succeeded). zarrsmith also writes `<output>.transforms.json` (the position of every tile) next to the output.
 
-Requires ZarrSmith with `zarrsmith fuse --label_offsets/--label_mapping` (branch `consolidated_translation`, not released yet).
+Requires ZarrSmith with `zarrsmith fuse-labels` (branch `consolidated_translation`, not released yet).
 
 ## Input
 | Name | Type | Description |
@@ -34,7 +34,7 @@ Requires ZarrSmith with `zarrsmith fuse --label_offsets/--label_mapping` (branch
 | `dtype` | no | Output dtype. Default: `uint32` |
 | `pyramid_method` | no | `nearest` or `mode` for the pyramid levels. Default: `nearest` (zarrsmith's default for labels) |
 
-Extra options of `zarrsmith fuse` (e.g. `-cs`, `-ms`, `--shards`, `-cp`) can be passed with `ext.args`.
+Extra options of `zarrsmith fuse-labels` (e.g. `-cs`, `-ms`, `--shards`, `-cp`) can be passed with `ext.args`.
 
 ## Output
 | Name | Type | Description |

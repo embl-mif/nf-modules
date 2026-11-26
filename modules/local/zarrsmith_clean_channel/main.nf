@@ -1,7 +1,9 @@
 process ZARRSMITH_CLEAN_CHANNEL {
     tag "${meta.id}"
     label 'process_high'
-    container 'ghcr.io/embl-mif/zarrsmith:0.6.5'
+    // `zarrsmith mask`, from the conda environment in environment.yml (a commit of ZarrSmith's
+    // branch consolidated_translation, not released yet; pin a release once it is out).
+    conda "${moduleDir}/environment.yml"
 
     input:
     tuple val(meta), path(intensity_zarr), path(labels_zarr)
@@ -31,11 +33,12 @@ process ZARRSMITH_CLEAN_CHANNEL {
         fi
         mkdir -p "\$(dirname "\$out")"
 
-        create_zarrsmith_clean_channel.py \
-            --intensity "${intensity_zarr}" \
-            --labels "${labels_zarr}" \
-            --output "${output_zarr}" \
-            --channel ${meta.clean_channel}
+        # every channel, plus <channel>_clean: the channel zeroed outside the labels
+        zarrsmith mask \
+            -i "${intensity_zarr}" \
+            -l "${labels_zarr}" \
+            -z "${output_zarr}" \
+            -c ${shellQuote(meta.clean_channel)}
     fi
 
     if [ ! -e ${shellQuote(output_zarr)}/zarr.json ] && [ ! -e ${shellQuote(output_zarr)}/.zgroup ]; then

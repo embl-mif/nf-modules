@@ -1,6 +1,6 @@
 # ZARRSMITH_FILTER
 
-Keeps only the labels whose row in a measurements CSV satisfies the area / property limits, relabels the survivors to `1..N` consistently across all pyramid levels, and writes the filtered label OME-Zarr and the matching filtered CSV.
+Keeps only the labels whose row in a measurements CSV satisfies the area / property limits, relabels the survivors to `1..N` consistently across all pyramid levels, and writes the filtered label OME-Zarr and the matching filtered CSV, with `zarrsmith filter-labels`.
 
 ## Input
 | Name | Type | Description |

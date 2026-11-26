@@ -1,4 +1,4 @@
-name: zarrsmith_fuse_labels
+name: zarrsmith
 channels:
   - conda-forge
   - nodefaults
@@ -7,5 +7,8 @@ dependencies:
   - git
   - pip
   - pip:
-      # `zarrsmith fuse --label_offsets/--label_mapping` is not released yet; pin a release once it is.
-      - "zarrsmith @ git+https://github.com/embl-mif/zarrsmith.git@consolidated_translation"
+      # ZarrSmith at a commit of branch consolidated_translation (not released yet): the commands
+      # convert, resample, project, threshold, mask, measure, filter-labels, plan-tiles and fuse-labels.
+      # Every ZarrSmith module has this same file, so Nextflow builds one environment for all of them.
+      # Pin a release once there is one.
+      - "zarrsmith @ git+https://github.com/embl-mif/zarrsmith.git@9b32802585003bc69455397bab189e5560c9bcf9"

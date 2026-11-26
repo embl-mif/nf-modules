@@ -1,9 +1,8 @@
 process ZARRSMITH_FUSE_LABELS {
     tag "${meta.id}"
     label 'process_medium'
-    // Needs ZarrSmith with `zarrsmith fuse --label_offsets/--label_mapping` (branch
-    // consolidated_translation, not released yet). Pin this to the release version once it is out.
-    container 'ghcr.io/embl-mif/zarrsmith:consolidated_translation'
+    // `zarrsmith fuse-labels`, from the conda environment in environment.yml (a commit of ZarrSmith's
+    // branch consolidated_translation, not released yet; pin a release once it is out).
     conda "${moduleDir}/environment.yml"
 
     input:
@@ -30,41 +29,35 @@ process ZARRSMITH_FUSE_LABELS {
     // local_image is a NO_*-named sentinel when the image is given by URI (see PREALLOCATE_ZARR)
     def source = image_uri ?: (!local_image.name.startsWith('NO_') ? local_image : null)
 
-    // offsets CSV (tile_index * label_offset_step per store) and the source's pyramid (-nl/-df)
-    def prepareParts = [
-        'fuse_labels_inputs.py',
-        '--tiles-dir', 'tiles',
-        '--tiles-csv', shellQuote(tiles_csv),
-        '--label-offset-step', meta.label_offset_step,
-        '--offsets-csv', 'label_offsets.csv',
-        '--pyramid-args', 'pyramid_args.txt',
-    ]
-    if (source)                        { prepareParts.addAll(['--source-image', shellQuote(source)]) }
-    if (meta.resolution_level != null) { prepareParts.addAll(['--resolution-level', meta.resolution_level]) }
-    if (meta.num_levels != null)       { prepareParts.addAll(['--num-levels', meta.num_levels]) }
-    if (meta.downscale_factor != null) { prepareParts.add('--downscale-factor'); prepareParts.addAll(meta.downscale_factor.toString().split(/[\s,;]+/).findAll { it }) }
-
-    // -m zarr: a folder of OME-Zarr stores, each placed by its own NGFF translation.
-    // --label_offsets/--label_mapping imply --data_type label and blend none.
+    // -i: a folder of OME-Zarr stores, each placed by its own NGFF translation.
+    // --tiles_csv/--label_offset_step: every tile's ids get tile_index * step added (the numbering
+    // LOCAL_LABEL_MATCHER gave the graph nodes), after checking that the staged stores and the CSV
+    // list the same tiles; the offsets used are written next to the output (<name>.label_offsets.csv).
+    // -lm: LABEL_SOLVER's mapping merges the objects split between tiles. Labels are never blended.
+    // -idf/-sl: the pyramid follows the source image from the segmented level on, so level k of the
+    // labels matches level resolution_level + k of the image; -nl/-df override it.
     def fuseParts = [
-        'zarrsmith', 'fuse',
-        '-m', 'zarr',
+        'zarrsmith', 'fuse-labels',
         '-i', 'tiles',
         '-z', shellQuote(output_zarr),
-        '-lo', 'label_offsets.csv',
+        '--tiles_csv', shellQuote(tiles_csv),
+        '--label_offset_step', meta.label_offset_step,
         '-lm', shellQuote(global_mapping),
-        '-od', meta.dtype ?: 'uint32',
+        '-dt', meta.dtype ?: 'uint32',
         '-rw', task.cpus ?: 1,
         '-ow',
     ]
+    if (source)                        { fuseParts.addAll(['-idf', shellQuote(source)]) }
+    if (source && meta.resolution_level != null) { fuseParts.addAll(['-sl', meta.resolution_level]) }
+    if (meta.num_levels != null)       { fuseParts.addAll(['-nl', meta.num_levels]) }
+    if (meta.downscale_factor != null) { fuseParts.add('-df'); fuseParts.addAll(meta.downscale_factor.toString().split(/[\s,;]+/).findAll { it }) }
     if (meta.pyramid_method != null)   { fuseParts.addAll(['-me', meta.pyramid_method]) }
 
     // Keep this script indented with spaces only: Nextflow dedents it, and stray tabs
     // leave the END_VERSIONS heredoc terminator indented, so bash never closes it.
     """
     mkdir -p "\$(dirname ${shellQuote(output_zarr)})"
-    ${prepareParts.join(' ')}
-    ${fuseParts.join(' ')} \$(cat pyramid_args.txt) ${args}
+    ${fuseParts.join(' ')} ${args}
 
     if [ ! -e ${shellQuote(output_zarr)}/zarr.json ] && [ ! -e ${shellQuote(output_zarr)}/.zgroup ]; then
         echo "ERROR: expected zarr store not found: ${output_zarr}" >&2

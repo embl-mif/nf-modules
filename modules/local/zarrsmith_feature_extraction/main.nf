@@ -1,7 +1,9 @@
 process ZARRSMITH_FEATURE_EXTRACTION {
     tag "${meta.id}"
     label 'process_medium'
-    container 'ghcr.io/embl-mif/zarrsmith:0.6.5'
+    // `zarrsmith measure`, from the conda environment in environment.yml (a commit of ZarrSmith's
+    // branch consolidated_translation, not released yet; pin a release once it is out).
+    conda "${moduleDir}/environment.yml"
 
     input:
     tuple val(meta), path(intensity_zarr), path(labels_zarr)
@@ -20,11 +22,16 @@ process ZARRSMITH_FEATURE_EXTRACTION {
         "'${value.toString().replace("'", "'\"'\"'")}'"
     }
 
-    def intensityLevelArg = meta.features_intensity_resolution_level != null ? "--intensity-resolution-level ${meta.features_intensity_resolution_level}" : ""
-    def labelsLevelArg = meta.features_labels_resolution_level != null ? "--labels-resolution-level ${meta.features_labels_resolution_level}" : ""
-    def channelsArg = meta.features_channels ? "--channels ${shellQuote(meta.features_channels)}" : ""
-    def extraPropertiesArg = meta.features_extra_properties ? "--extra-properties ${shellQuote(meta.features_extra_properties)}" : ""
-    def extraIntensityPropertiesArg = meta.features_extra_intensity_properties ? "--extra-intensity-properties ${shellQuote(meta.features_extra_intensity_properties)}" : ""
+    // List values ("0,2", "solidity; euler_number") become one argument per item.
+    def listArg = { flag, value ->
+        def items = value ? value.toString().trim().split(/[;,\s]+/).findAll { it } : []
+        items ? "${flag} ${items.collect { shellQuote(it) }.join(' ')}" : ""
+    }
+    def intensityLevelArg = meta.features_intensity_resolution_level != null ? "-lv ${meta.features_intensity_resolution_level}" : ""
+    def labelsLevelArg = meta.features_labels_resolution_level != null ? "-llv ${meta.features_labels_resolution_level}" : ""
+    def channelsArg = listArg('-ch', meta.features_channels)
+    def extraPropertiesArg = listArg('--properties', meta.features_extra_properties)
+    def extraIntensityPropertiesArg = listArg('--intensity_properties', meta.features_extra_intensity_properties)
 
     """
     if [ -e ${shellQuote(output_csv)} ]; then
@@ -32,11 +39,11 @@ process ZARRSMITH_FEATURE_EXTRACTION {
     else
         mkdir -p \$(dirname ${shellQuote(output_csv)})
 
-        extract_zarrsmith_features.py \
-            --intensity "${intensity_zarr}" \
-            --labels "${labels_zarr}" \
-            --output "${output_csv}" \
-            --dataset-id ${shellQuote(meta.id)} \
+        zarrsmith measure \
+            -i "${intensity_zarr}" \
+            -l "${labels_zarr}" \
+            -oc "${output_csv}" \
+            --dataset_id ${shellQuote(meta.id)} \
             ${intensityLevelArg} \
             ${labelsLevelArg} \
             ${channelsArg} \

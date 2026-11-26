@@ -4,7 +4,7 @@ Changes the pixel size of an OME-Zarr image with `zarrsmith resample`, rescaling
 
 Images use linear interpolation, with anti-aliasing on the axes that shrink; labels use nearest neighbour. The pixel size is in the units of the dataset, usually micrometer.
 
-Requires ZarrSmith 0.6.5 or later.
+Runs in the conda environment of `environment.yml` (ZarrSmith at a commit of branch `consolidated_translation`, shared with the other ZarrSmith modules).
 
 If `zarr_output` already holds a complete OME-Zarr, the step is skipped; an incomplete one is removed and written again.
 

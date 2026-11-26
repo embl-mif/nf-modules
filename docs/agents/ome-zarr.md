@@ -27,6 +27,6 @@ None beyond the target version. RFC-2 (zarr v3) comes with 0.5. RFC-5 (coordinat
 ## Notes
 
 - Never mix pairs: zarr v2 with NGFF 0.4, zarr v3 with NGFF 0.5.
-- Tiles are planned and fused with ZarrSmith (`plan_tiles`, `zarrsmith fuse --label_offsets/--label_mapping`); each tile store is placed by its own NGFF translation, read as the centre of the first voxel (0.6 convention).
+- Tiles are planned and fused with ZarrSmith (`zarrsmith plan-tiles`, `zarrsmith fuse-labels`); each tile store is placed by its own NGFF translation, read as the centre of the first voxel (0.6 convention).
 - Label pyramids are sampled (nearest), never averaged; the merged label pyramid follows the source image from the segmented resolution level on.
 - Follow ZarrSmith's own conventions (zarrsmith/docs/agents/ome-zarr.md) for layout, compression and metadata writing.

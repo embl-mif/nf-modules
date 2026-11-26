@@ -1,6 +1,6 @@
 # ZARRSMITH_MIP
 
-Creates a multiscale OME-Zarr holding the maximum-intensity projection over Z of the input, at every resolution level.
+Creates a multiscale OME-Zarr holding the maximum-intensity projection over Z of the input, at every resolution level, with `zarrsmith project`. Z is removed from the voxel sizes, units and translations (y/x translations are kept).
 
 ## Input
 | Name | Type | Description |

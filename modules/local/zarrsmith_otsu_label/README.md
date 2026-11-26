@@ -1,6 +1,6 @@
 # ZARRSMITH_OTSU_LABEL
 
-Otsu-thresholds one channel at a chosen resolution level, labels the mask, and rebuilds the full pyramid by nearest-neighbour resizing, so label ids are consistent across levels. Writes a label OME-Zarr.
+Otsu-thresholds one channel at a chosen resolution level, labels the mask, and rebuilds the full pyramid by nearest-neighbour resizing, so label ids are consistent across levels, with `zarrsmith threshold`. Writes a `uint32` label OME-Zarr (`meta.otsu_channel` may be an index or a channel name).
 
 ## Input
 | Name | Type | Description |

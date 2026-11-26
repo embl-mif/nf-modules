@@ -2,7 +2,7 @@
 
 Splits an OME-Zarr image into a regular grid of (optionally overlapping) tiles and writes their bounds, in voxels as half-open `[min, max)` intervals, to a CSV. Each row has a unique `dataset_id` of the form `<source_dataset_id>__<tile_id>`. Tiles are numbered from 1, x fastest, then y, then z.
 
-The tiles are planned by ZarrSmith (`zarrsmith.utils.tiling.plan_tiles`, branch `consolidated_translation`, not released yet), from the image as ZarrSmith reads it, so they agree with ZARRSMITH_FUSE_LABELS.
+The tiles are planned by `zarrsmith plan-tiles` (branch `consolidated_translation`, not released yet), from the image as ZarrSmith reads it, so they agree with ZARRSMITH_FUSE_LABELS. The `meta` keys become its options: `tile_size_<ax>` → `-ts "x=...;y=..."`, `x_min` ... `z_max` → `-roi "x=min:max;..."`, `use_physical_units` → `-pu`.
 
 - An axis given `tile_size_<ax>` is cut at that size.
 - An axis without one is cut only when a tile would read more than `max_tile_voxels` voxels (halo included, times `tile_resize ** ndim`). ZarrSmith then chooses the number of tiles along each such axis that fits with the least cut area, then the fewest tiles. If every axis has a tile size and the tiles are over the budget, the task fails.

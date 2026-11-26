@@ -1,7 +1,9 @@
 process ZARRSMITH_RESAMPLE {
     tag "${meta.id}"
     label 'process_medium'
-    container 'ghcr.io/embl-mif/zarrsmith:0.6.5'
+    // `zarrsmith resample`, from the conda environment in environment.yml (a commit of ZarrSmith's
+    // branch consolidated_translation, not released yet; pin a release once it is out).
+    conda "${moduleDir}/environment.yml"
 
     input:
     tuple val(meta), path(input_zarr)
